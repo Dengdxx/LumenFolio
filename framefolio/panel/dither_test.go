@@ -39,7 +39,7 @@ func TestDitherUsesOnlyInks(t *testing.T) {
 	for _, ink := range inks {
 		allowed[ink.Preview] = true
 	}
-	for _, alg := range Algorithms() {
+	for _, alg := range append(Algorithms(), AdditionalAlgorithms()...) {
 		dst := alg.Dither(src)
 		if !dst.Bounds().Eq(src.Bounds()) {
 			t.Fatalf("%s 尺寸 %v", alg.Name(), dst.Bounds())
@@ -56,7 +56,7 @@ func TestDitherUsesOnlyInks(t *testing.T) {
 func TestDitherDiffersFromNearest(t *testing.T) {
 	src := gradient()
 	base := nearestDither{}.Dither(src)
-	for _, alg := range Algorithms()[1:] {
+	for _, alg := range append(Algorithms()[1:], AdditionalAlgorithms()...) {
 		dst := alg.Dither(src)
 		if bytesEqual(base.Pix, dst.Pix) {
 			t.Errorf("%s 的结果与最近色完全相同", alg.Name())
@@ -64,12 +64,16 @@ func TestDitherDiffersFromNearest(t *testing.T) {
 	}
 }
 
-func TestFloydSteinbergIsDeterministic(t *testing.T) {
+func TestDitherIsDeterministic(t *testing.T) {
 	src := gradient()
-	a := floydSteinberg{}.Dither(src)
-	b := floydSteinberg{}.Dither(src)
-	if !bytesEqual(a.Pix, b.Pix) {
-		t.Fatal("Floyd-Steinberg 两次结果不同")
+	for _, alg := range append([]Ditherer{floydSteinberg{}}, AdditionalAlgorithms()...) {
+		t.Run(alg.Name(), func(t *testing.T) {
+			a := alg.Dither(src)
+			b := alg.Dither(src)
+			if !bytesEqual(a.Pix, b.Pix) {
+				t.Fatal("两次抖动的结果不同")
+			}
+		})
 	}
 }
 
@@ -80,7 +84,7 @@ func TestDitherKeepsInkColors(t *testing.T) {
 		stripe := image.Rect(i*stripeWidth, 0, (i+1)*stripeWidth, Height)
 		draw.Draw(src, stripe, image.NewUniform(ink.Preview), image.Point{}, draw.Src)
 	}
-	for _, alg := range Algorithms() {
+	for _, alg := range append(Algorithms(), AdditionalAlgorithms()...) {
 		t.Run(alg.Name(), func(t *testing.T) {
 			dst := alg.Dither(src)
 			if !bytesEqual(src.Pix, dst.Pix) {
@@ -93,7 +97,8 @@ func TestDitherKeepsInkColors(t *testing.T) {
 func TestDitherKeepsWhiteBackground(t *testing.T) {
 	src := image.NewNRGBA(image.Rect(0, 0, Width, Height))
 	draw.Draw(src, src.Bounds(), image.White, image.Point{}, draw.Src)
-	for _, alg := range []Ditherer{orderedDither{n: 4}, orderedDither{n: 8}, noiseDither{}} {
+	ordered := []Ditherer{orderedDither{n: 4}, orderedDither{n: 8}, noiseDither{}}
+	for _, alg := range append(ordered, AdditionalAlgorithms()...) {
 		t.Run(alg.Name(), func(t *testing.T) {
 			dst := alg.Dither(src)
 			whitePixels := 0
@@ -108,6 +113,59 @@ func TestDitherKeepsWhiteBackground(t *testing.T) {
 				t.Fatalf("纯白背景应以白色墨水为主，实际白色占比 %.2f%%", float64(whitePixels)*100/(Width*Height))
 			}
 		})
+	}
+}
+
+func TestAtkinsonMirrorsRowsAndSpreadsTwoRows(t *testing.T) {
+	gray := [4][4]byte{
+		{111, 119, 92, 211},
+		{104, 215, 82, 102},
+		{209, 92, 78, 63},
+		{181, 99, 120, 52},
+	}
+	// 按 1/8 权重逐点演算，固定奇数行反向、跨两行和边界误差丢弃的结果。
+	want := [4][4]int{
+		{5, 5, 4, 1},
+		{4, 1, 3, 5},
+		{1, 4, 4, 0},
+		{2, 3, 5, 0},
+	}
+	bounds := image.Rect(2, 3, 6, 7)
+	src := image.NewNRGBA(image.Rect(0, 0, 9, 9)).SubImage(bounds).(*image.NRGBA)
+	for y, row := range gray {
+		for x, v := range row {
+			src.SetNRGBA(bounds.Min.X+x, bounds.Min.Y+y, color.NRGBA{v, v, v, 255})
+		}
+	}
+	for _, alg := range AdditionalAlgorithms() {
+		if alg.Name() != "Atkinson" {
+			continue
+		}
+		dst := alg.Dither(src)
+		for y, row := range want {
+			for x, index := range row {
+				if got := dst.NRGBAAt(bounds.Min.X+x, bounds.Min.Y+y); got != inks[index].Preview {
+					t.Errorf("(%d, %d) 得到 %v，预期 %v", x, y, got, inks[index].Preview)
+				}
+			}
+		}
+		return
+	}
+	t.Fatal("额外算法未提供 Atkinson")
+}
+
+func TestBlueNoiseTileHasUniformThresholds(t *testing.T) {
+	if len(blueNoiseTile) != blueNoiseSize*blueNoiseSize {
+		t.Fatalf("蓝噪声阈值数量 %d", len(blueNoiseTile))
+	}
+	var counts [256]int
+	for i := range len(blueNoiseTile) {
+		counts[blueNoiseTile[i]]++
+	}
+	for value, count := range counts {
+		if count != len(blueNoiseTile)/len(counts) {
+			t.Errorf("阈值 %d 出现 %d 次", value, count)
+		}
 	}
 }
 
