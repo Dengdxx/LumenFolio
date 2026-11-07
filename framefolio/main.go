@@ -21,7 +21,7 @@ import (
 // launchGUI 判断这组参数应打开界面还是进入命令行。
 //
 // 没有参数时打开空白界面。恰好一个 .png、.jpg 或 .jpeg 路径时打开并载入该图。
-// ota、选项和其他参数都留给命令行，避免未知命令误开窗口。
+// ota、frame、export、选项和其他参数都留给命令行，避免未知命令误开窗口。
 func launchGUI(args []string) (bool, string) {
 	if len(args) == 0 {
 		return true, ""

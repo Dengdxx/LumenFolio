@@ -60,7 +60,7 @@ const (
 
 // runGUI 在主 goroutine 启动界面。只能由进程入口调用；命令行路径不得进入 Gio 事件循环。
 //
-// 界面在 1200×1600 的六色面板上选构图、比较抖动，不连接设备。上传按钮仍是占位。
+// 提供取景、六色预览、上传和离线导出；设备通信在后台执行，不阻塞窗口事件循环。
 func runGUI(initialFile string) int {
 	shaper := loadShaper()
 	ui := newUI(shaper, initialFile)
