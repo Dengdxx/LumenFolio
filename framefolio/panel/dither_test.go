@@ -55,7 +55,7 @@ func TestDitherUsesOnlyInks(t *testing.T) {
 
 func TestDitherDiffersFromNearest(t *testing.T) {
 	src := gradient()
-	base := nearestDither{}.Dither(src)
+	base := Algorithms()[0].Dither(src)
 	for _, alg := range append(Algorithms()[1:], AdditionalAlgorithms()...) {
 		dst := alg.Dither(src)
 		if bytesEqual(base.Pix, dst.Pix) {
@@ -66,7 +66,7 @@ func TestDitherDiffersFromNearest(t *testing.T) {
 
 func TestDitherIsDeterministic(t *testing.T) {
 	src := gradient()
-	for _, alg := range append([]Ditherer{floydSteinberg{}}, AdditionalAlgorithms()...) {
+	for _, alg := range append(Algorithms()[1:], AdditionalAlgorithms()...) {
 		t.Run(alg.Name(), func(t *testing.T) {
 			a := alg.Dither(src)
 			b := alg.Dither(src)
@@ -97,7 +97,7 @@ func TestDitherKeepsInkColors(t *testing.T) {
 func TestDitherKeepsWhiteBackground(t *testing.T) {
 	src := image.NewNRGBA(image.Rect(0, 0, Width, Height))
 	draw.Draw(src, src.Bounds(), image.White, image.Point{}, draw.Src)
-	ordered := []Ditherer{orderedDither{n: 4}, orderedDither{n: 8}, noiseDither{}}
+	ordered := Algorithms()[2:]
 	for _, alg := range append(ordered, AdditionalAlgorithms()...) {
 		t.Run(alg.Name(), func(t *testing.T) {
 			dst := alg.Dither(src)

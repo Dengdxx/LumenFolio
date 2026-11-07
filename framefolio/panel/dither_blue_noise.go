@@ -2,6 +2,7 @@ package panel
 
 import (
 	_ "embed"
+	"fmt"
 	"image"
 )
 
@@ -12,24 +13,29 @@ const blueNoiseSize = 64
 //go:embed blue_noise_64.bin
 var blueNoiseTile string
 
-type blueNoiseDither struct{}
-
-func (blueNoiseDither) Name() string { return "蓝噪声 64×64" }
-
-// Dither 用周期蓝噪声阈值替代 Bayer 网格，仍按同一色差规则选墨水。
-func (blueNoiseDither) Dither(src *image.NRGBA) *image.NRGBA {
-	bounds := src.Bounds()
-	dst := image.NewNRGBA(bounds)
-	for y := range bounds.Dy() {
-		maskRow := (y % blueNoiseSize) * blueNoiseSize
-		srcRow := src.PixOffset(bounds.Min.X, bounds.Min.Y+y)
-		dstRow := dst.PixOffset(bounds.Min.X, bounds.Min.Y+y)
-		for x := range bounds.Dx() {
-			i := srcRow + 4*x
-			threshold := (float64(blueNoiseTile[maskRow+x%blueNoiseSize]) + 0.5) / 256
-			ink := nearestBiased(src.Pix[i], src.Pix[i+1], src.Pix[i+2], threshold)
-			put(dst, dstRow+4*x, ink)
-		}
+// NewBlueNoiseDither 返回平铺灰度阈值图的蓝噪声算法。
+// tile 为 nil 时用内置 64×64 蓝噪声图。自定义图须由调用方选好，构造时复制像素。
+// offset 以面板像素为单位平移阈值采样坐标，支持负值。
+func NewBlueNoiseDither(tile *image.Gray, offset image.Point, options ThresholdOptions) (Ditherer, error) {
+	if err := options.validate(); err != nil {
+		return nil, err
 	}
-	return dst
+	if tile == nil {
+		return builtinBlueNoise(offset, options), nil
+	}
+	width, height := tile.Rect.Dx(), tile.Rect.Dy()
+	if width <= 0 || height <= 0 {
+		return nil, fmt.Errorf("蓝噪声阈值图为空")
+	}
+	pixels := make([]byte, width*height)
+	for y := range height {
+		row := tile.PixOffset(tile.Rect.Min.X, tile.Rect.Min.Y+y)
+		copy(pixels[y*width:(y+1)*width], tile.Pix[row:row+width])
+	}
+	name := fmt.Sprintf("蓝噪声 %d×%d", width, height)
+	return tiledDither(name, string(pixels), width, height, 256, offset, options), nil
+}
+
+func builtinBlueNoise(offset image.Point, options ThresholdOptions) Ditherer {
+	return tiledDither("蓝噪声 64×64", blueNoiseTile, blueNoiseSize, blueNoiseSize, 256, offset, options)
 }
