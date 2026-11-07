@@ -13,7 +13,7 @@
  */
 
 /** @brief 屏幕动作。按键与控制台都投到这里，由显示任务串行执行。 */
-enum class display_cmd { refresh, next, prev, factory };
+enum class display_cmd { refresh, next, prev, factory, inbox };
 
 /**
  * @brief 把一条屏幕动作投给显示任务。
@@ -50,3 +50,15 @@ void app_hold_awake(void);
  * @note 只读缓存，不采样、不阻塞，可以从 HTTP 任务里调。
  */
 void app_describe(char *buf, size_t size);
+
+/**
+ * @brief 记下一次传图开始，电源守护在这次传输结束前不进入深度睡眠。
+ *
+ * @note 只置标志。传输在 HTTP 任务里进行，睡眠由另一个任务判断，两边只读写这一个标志。
+ */
+void app_inbox_begin(void);
+
+/**
+ * @brief 传图结束，恢复空闲计时。无论写入成功还是失败都要调用。
+ */
+void app_inbox_end(void);

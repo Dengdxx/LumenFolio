@@ -26,6 +26,7 @@
 #include "epd709.h"
 #include "epd_fb.h"
 #include "esp_heap_caps.h"
+#include "esp_http_server.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -60,6 +61,7 @@ int s_frame_count;                 // 卡上帧文件数量，显示任务每次
 int64_t s_idle_since_us;           // 上一次有命令的时刻
 volatile bool s_sleep_requested;   // 控制台要求立刻睡
 volatile bool s_sleep_hold;        // 本次开机不自动睡（台面调试用）
+volatile bool s_inbox_busy;        // 正在接收一张图，这段时间不自动睡
 
 const char *display_state_name()
 {
@@ -205,7 +207,7 @@ void power_guard_task(void *)
         }
         // 带 VBUS 的线由 s_plugged 拦住。再看枚举，只为不供电的烧录线：它只有
         // D+/D-，TP4056 一直报未接充电。这是台面特例，一般不会遇到。
-        if (s_sleep_hold || s_plugged || usb_serial_jtag_is_connected() ||
+        if (s_sleep_hold || s_plugged || s_inbox_busy || usb_serial_jtag_is_connected() ||
             s_display_state == display_state::busy) {
             continue;
         }
@@ -335,6 +337,119 @@ void register_console_route()
 }
 
 /**
+ * @brief POST /frame：按声明长度保存 EPD1／EPD2，再由显示任务解码并刷屏。
+ *
+ * 帧头可跨任意多次 recv，验证尺寸和 Content-Length 后才擦槽。载荷边收边写，
+ * 元数据落盘后单独写魔数，避免未完成的上传被误认成有效帧。Flash 写入期间
+ * 接收路径不访问 PSRAM；解压长度、完整流结束和 Adler32 由随后的显示任务验证。
+ */
+esp_err_t handle_frame_upload(httpd_req_t *request)
+{
+    if (httpd_req_get_hdr_value_len(request, "Transfer-Encoding") || !request->content_len) {
+        httpd_resp_set_status(request, "411 Length Required");
+        return httpd_resp_sendstr(request, "需要固定的 Content-Length，不接受分块传输\n");
+    }
+    if (request->content_len < EPD_FRAME_ZLIB_HEADER_BYTES ||
+        request->content_len > ARTIFACTS_FRAME_BYTES) {
+        httpd_resp_set_status(request, "413 Content Too Large");
+        return httpd_resp_sendstr(request, "帧长度必须在 16 到 960012 字节之间\n");
+    }
+
+    char type[48] = {};
+    if (httpd_req_get_hdr_value_str(request, "Content-Type", type, sizeof(type)) != ESP_OK ||
+        strcmp(type, "application/octet-stream") != 0) {
+        httpd_resp_set_status(request, "415 Unsupported Media Type");
+        return httpd_resp_sendstr(request, "需要 application/octet-stream\n");
+    }
+
+    app_inbox_begin();
+    esp_err_t result = ESP_OK;
+    uint8_t header[EPD_FRAME_ZLIB_HEADER_BYTES];
+    size_t got = 0;
+    while (result == ESP_OK && got < sizeof(header)) {
+        const int received = httpd_req_recv(request, reinterpret_cast<char *>(header + got),
+                                            sizeof(header) - got);
+        if (received == HTTPD_SOCK_ERR_TIMEOUT) {
+            continue;
+        }
+        if (received <= 0) {
+            result = ESP_FAIL;
+            break;
+        }
+        got += static_cast<size_t>(received);
+    }
+    epd_frame_info_t info = {};
+    if (result == ESP_OK) {
+        result = epd_frame_parse_header(header, sizeof(header), &info);
+        if (result == ESP_OK && info.frame_bytes != request->content_len) {
+            result = ESP_ERR_INVALID_SIZE;
+        }
+    }
+    bool writing = false;
+    if (result == ESP_OK) {
+        writing = true;
+        result = artifacts_inbox_begin();
+    }
+    uint8_t chunk[4096];
+    while (result == ESP_OK && got < info.frame_bytes) {
+        const size_t ask = info.frame_bytes - got < sizeof(chunk)
+                               ? info.frame_bytes - got : sizeof(chunk);
+        const int received = httpd_req_recv(request, reinterpret_cast<char *>(chunk), ask);
+        if (received == HTTPD_SOCK_ERR_TIMEOUT) {
+            continue;
+        }
+        if (received <= 0) {
+            result = ESP_FAIL;
+            break;
+        }
+        result = artifacts_inbox_write(got, chunk, static_cast<size_t>(received));
+        got += static_cast<size_t>(received);
+    }
+    if (result == ESP_OK) {
+        // EPD1 的前 16 字节还含 4 字节像素，也必须先于魔数落盘。
+        result = artifacts_inbox_write(4, header + 4, sizeof(header) - 4);
+    }
+    if (result == ESP_OK) {
+        result = artifacts_inbox_write(0, header, 4);
+    }
+    if (result != ESP_OK && writing) {
+        artifacts_inbox_discard();
+    }
+    app_inbox_end();
+
+    if (result != ESP_OK) {
+        httpd_resp_set_status(request, result == ESP_ERR_NOT_FOUND || result == ESP_ERR_INVALID_SIZE
+                                           ? "422 Unprocessable Content"
+                                           : "500 Internal Server Error");
+        httpd_resp_set_type(request, "text/plain; charset=utf-8");
+        return httpd_resp_sendstr(request, "画面没有写入\n");
+    }
+    if (app_post_display(display_cmd::inbox) != ESP_OK) {
+        httpd_resp_set_status(request, "202 Accepted");
+        return httpd_resp_sendstr(request, "已写入，屏幕还没排上刷新\n");
+    }
+    httpd_resp_set_status(request, "202 Accepted");
+    return httpd_resp_sendstr(request, "已写入，正在刷上屏\n");
+}
+
+httpd_uri_t s_uri_frame;
+
+void register_frame_route()
+{
+    s_uri_frame = {};
+    s_uri_frame.uri = "/frame";
+    s_uri_frame.method = HTTP_POST;
+    s_uri_frame.handler = handle_frame_upload;
+
+    const esp_err_t err = otaServiceRegisterHandler(&s_uri_frame);
+    if (err != ESP_OK) {
+        ESP_LOGE(kTag, "传图接口注册失败：%s", esp_err_to_name(err));
+        return;
+    }
+    ESP_LOGI(kTag, "传图：POST /frame，EPD1／EPD2 无损帧");
+}
+
+/**
  * @brief 显示任务：初始化面板后等命令，不主动刷屏。
  *
  * 面板是双稳态的，上电后保持上一次的画面，所以开机不刷能省下几十秒，
@@ -383,6 +498,7 @@ void display_task(void *)
         int step = 0;
         bool force = false;
         bool factory = false;
+        bool inbox = false;
         bool woke = false;
 
         board_key_event_t key = {};
@@ -410,6 +526,8 @@ void display_task(void *)
                 --step;
             } else if (cmd == display_cmd::factory) {
                 factory = true;
+            } else if (cmd == display_cmd::inbox) {
+                inbox = true;
             } else {
                 force = true;
             }
@@ -424,7 +542,16 @@ void display_task(void *)
         s_frame_count = count;
         s_display_state = display_state::busy;
 
-        if (factory) {
+        if (inbox) {
+            // 上传槽里的图优先于同一批里的翻页：图刚写进去，这一轮就该把它刷上屏。
+            if (artifacts_draw_inbox_frame() == ESP_OK) {
+                s_last_result = present_back("上传的画面") ? "inbox" : "inbox-failed";
+            } else {
+                ESP_LOGW(kTag, "上传槽里没有可用画面");
+                s_last_result = "inbox-empty";
+                led_event_post(LED_EV_ANOMALY, 0);
+            }
+        } else if (factory) {
             // 出厂画面固定来自 artifacts，不管卡上有没有帧文件。
             if (artifacts_draw_boot_frame() == ESP_OK) {
                 s_last_result = present_back("出厂画面") ? "factory" : "factory-failed";
@@ -473,6 +600,17 @@ void app_request_sleep()
 void app_hold_awake()
 {
     s_sleep_hold = true;
+}
+
+void app_inbox_begin()
+{
+    s_inbox_busy = true;
+}
+
+void app_inbox_end()
+{
+    s_inbox_busy = false;
+    s_idle_since_us = esp_timer_get_time();
 }
 
 void app_describe(char *buf, size_t size)
@@ -585,6 +723,7 @@ extern "C" void app_main(void)
     if (wifi == ESP_OK) {
         ESP_ERROR_CHECK(otaServiceStart());
         register_console_route();
+        register_frame_route();
     } else {
         ESP_LOGE(kTag, "Wi-Fi 未启动：%s，本次开机无法 OTA", esp_err_to_name(wifi));
     }

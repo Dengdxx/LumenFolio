@@ -10,6 +10,7 @@
 #include "driver/gpio.h"
 #include "driver/sdmmc_host.h"
 #include "epd_fb.h"
+#include "epd_frame.h"
 #include "esp_log.h"
 #include "esp_vfs_fat.h"
 #include "sdmmc_cmd.h"
@@ -25,10 +26,16 @@ constexpr int kMaxFreqKhz = SDMMC_FREQ_DEFAULT;
 
 sdmmc_card_t *s_card = nullptr;
 
-// 帧文件格式与 tools/make_schematic_frame.py 的 pack() 一致：
-// "EPD1" + 小端 uint16 x,y,w,h + 行优先 4bpp 像素。
-constexpr size_t kFrameMagicSize = 4;
-constexpr size_t kFrameHeaderSize = 12;
+/** @brief 为共享解码器提供精确读取；FATFS 短读或定位失败都视为帧读取错误。 */
+static esp_err_t read_frame_file(void *context, size_t offset, uint8_t *data, size_t size)
+{
+    FILE *file = static_cast<FILE *>(context);
+    if (fseek(file, static_cast<long>(offset), SEEK_SET) != 0 ||
+        fread(data, 1, size, file) != size) {
+        return ESP_FAIL;
+    }
+    return ESP_OK;
+}
 
 }  // namespace
 
@@ -220,41 +227,14 @@ esp_err_t board_sd_load_frame(const char *path)
         return ESP_ERR_NOT_FOUND;
     }
 
-    esp_err_t result = ESP_FAIL;
-    uint8_t header[kFrameHeaderSize] = {};
-    if (fread(header, 1, sizeof(header), file) != sizeof(header)) {
-        ESP_LOGE(kTag, "%s 连帧头都不够 12 字节", path);
-        result = ESP_ERR_INVALID_SIZE;
-    } else if (memcmp(header, "EPD1", kFrameMagicSize) != 0) {
-        ESP_LOGE(kTag, "%s 不是 EPD1 帧文件", path);
-        result = ESP_ERR_NOT_FOUND;
+    uint8_t *scratch = const_cast<uint8_t *>(epd_fb_front());
+    const esp_err_t result = epd_frame_decode(read_frame_file, file,
+                                             static_cast<size_t>(info.st_size), scratch, back);
+    if (result == ESP_OK) {
+        epd_fb_draw_rows(scratch);
     } else {
-        const int x = header[4] | (header[5] << 8);
-        const int y = header[6] | (header[7] << 8);
-        const int w = header[8] | (header[9] << 8);
-        const int h = header[10] | (header[11] << 8);
-        const size_t pixels = static_cast<size_t>(h) * static_cast<size_t>(w / 2);
-        if (x != 0 || y != 0 || w != EPD_FB_WIDTH || h != EPD_FB_HEIGHT ||
-            static_cast<size_t>(info.st_size) < kFrameHeaderSize + pixels) {
-            ESP_LOGE(kTag, "%s 是 %dx%d @(%d,%d)、%ld 字节，与 %dx%d 不符", path, w, h, x, y,
-                     static_cast<long>(info.st_size), EPD_FB_WIDTH, EPD_FB_HEIGHT);
-            result = ESP_ERR_INVALID_SIZE;
-        } else {
-            // 两块缓冲共用一次分配，借另一帧暂存行优先数据，避免自己拷给自己。
-            uint8_t *scratch = (back == epd_fb_front()) ? back + EPD_FB_FRAME_BYTES
-                                                        : (uint8_t *)epd_fb_front();
-            const size_t got = fread(scratch, 1, pixels, file);
-            if (got != pixels) {
-                ESP_LOGE(kTag, "%s 只读到 %u/%u 字节", path, static_cast<unsigned>(got),
-                         static_cast<unsigned>(pixels));
-                result = ESP_ERR_INVALID_SIZE;
-            } else {
-                epd_fb_draw_rows(scratch);
-                result = ESP_OK;
-            }
-        }
+        ESP_LOGE(kTag, "%s 帧解码失败：%s", path, esp_err_to_name(result));
     }
-
     fclose(file);
     return result;
 }

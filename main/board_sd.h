@@ -81,11 +81,11 @@ int board_sd_frame_count(void);
 esp_err_t board_sd_frame_at(int index, char *path, size_t size);
 
 /**
- * @brief 读一个 EPD1 帧文件，画进 back buffer。
+ * @brief 读取 EPD1 原始帧或 EPD2 压缩帧，完整验证后画进 back buffer。
  *
- * @param path board_sd_first_frame() 给出的完整路径。
+ * @param path board_sd_frame_at() 给出的完整路径。
  * @return ESP_OK 成功；ESP_ERR_INVALID_SIZE 尺寸不是 1200x1600 或文件不足一帧；
- *         ESP_ERR_NOT_FOUND 文件不存在或魔数不对；ESP_ERR_INVALID_STATE 帧缓冲未就绪。
+ *         ESP_ERR_NOT_FOUND 文件不存在或魔数不对；其余为读取、解压、校验或缓冲错误。
  *
  * @note 只画不刷：调用方拿到 ESP_OK 后再 epd_fb_present()。
  * @note 需要 epd_fb_init() 已完成，且中途不要有别的任务碰帧缓冲。

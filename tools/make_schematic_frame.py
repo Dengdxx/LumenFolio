@@ -3,9 +3,10 @@
 
 输出 .cache/schematic_frame.bin，不覆盖开机画面 main/boot_frame.bin。
 帧格式：
-    magic "EPD1"
-    uint16 x, y, w, h          小端，贴到屏幕上的位置
-    随后 h 行，每行 w/2 字节（w 必须为 1200，x 必须为 0）
+    magic "EPD2" + uint16 x, y, w, h（小端，固定为 0,0,1200,1600）
+    uint32 压缩载荷字节数（小端）+ 标准 zlib 流，含 Adler32 校验和
+    压缩后不更小时回退 "EPD1" + 同样的 x,y,w,h + 原始像素。
+    解压后仍是 h 行，每行 w/2 字节：
         前 300 字节 = 左半幅 IC0（x 0..599）
         后 300 字节 = 右半幅 IC1（x 600..1199）
         偶数 x 在高半字节，与 epd_fb_put_pixel() 一致
@@ -17,6 +18,7 @@ from __future__ import annotations
 
 import struct
 import sys
+import zlib
 from pathlib import Path
 
 from PIL import Image
@@ -96,8 +98,9 @@ def quantize(im: Image.Image) -> list[list[int]]:
 
 
 def pack(rows: list[list[int]]) -> bytes:
-    if len(rows) != HEIGHT or len(rows[0]) != WIDTH:
-        raise SystemExit(f"帧尺寸 {len(rows[0])}x{len(rows)}，期望 {WIDTH}x{HEIGHT}")
+    """保留 4bpp 色码，优先输出更小的 EPD2；压缩不划算时回退 EPD1。"""
+    if len(rows) != HEIGHT or any(len(row) != WIDTH for row in rows):
+        raise SystemExit(f"帧尺寸必须为 {WIDTH}x{HEIGHT}")
     payload = bytearray()
     for row in rows:
         packed = bytearray(ROW_BYTES)
@@ -108,8 +111,11 @@ def pack(rows: list[list[int]]) -> bytes:
             else:
                 packed[i] |= nib & 0x0F
         payload += packed
-    header = b"EPD1" + struct.pack("<HHHH", 0, 0, WIDTH, HEIGHT)
-    return header + payload
+    dimensions = struct.pack("<HHHH", 0, 0, WIDTH, HEIGHT)
+    compressed = zlib.compress(payload, level=6)
+    if 16 + len(compressed) < 12 + len(payload):
+        return b"EPD2" + dimensions + struct.pack("<I", len(compressed)) + compressed
+    return b"EPD1" + dimensions + payload
 
 
 def write_preview(rows: list[list[int]], path: Path) -> None:

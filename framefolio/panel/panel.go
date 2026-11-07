@@ -2,7 +2,11 @@
 // 命令行和窗口共用这里的取景、采样和抖动，不依赖界面库。
 package panel
 
-import "image/color"
+import (
+	"encoding/binary"
+	"image"
+	"image/color"
+)
 
 // 面板是 7.09 寸 Spectra 6，两颗 IC 各管 600 列，合计 1200×1600。
 // 抖动必须在这个分辨率上做完再缩小显示，否则预览的颗粒和上屏的不一样。
@@ -31,3 +35,31 @@ var inks = []Ink{
 
 // Inks 返回面板的六种墨水，顺序与固件帧缓冲一致。
 func Inks() []Ink { return inks }
+
+// FrameBytes 是 EPD1 原始帧的长度，也是编码帧的最大长度；EPD2 的实际长度可更小。
+const FrameBytes = 12 + Width*Height/2
+
+// Encode 把已抖动的 1200×1600 图编成无损帧，EPD2 不更小时回退 EPD1。
+//
+// 每个像素按预览色取最近的墨水，偶数列放高半字节，奇数列放低半字节。
+// 标准 zlib 只压缩行优先像素，解压后与原始 4bpp 逐字节一致；错误尺寸返回 nil。
+func Encode(src *image.NRGBA) []byte {
+	if src == nil || src.Bounds().Dx() != Width || src.Bounds().Dy() != Height {
+		return nil
+	}
+	frame := make([]byte, FrameBytes)
+	copy(frame, "EPD1")
+	binary.LittleEndian.PutUint16(frame[8:], Width)
+	binary.LittleEndian.PutUint16(frame[10:], Height)
+	origin := src.Bounds().Min
+	for y := range Height {
+		for x := 0; x < Width; x += 2 {
+			i := src.PixOffset(origin.X+x, origin.Y+y)
+			hi := nearest(src.Pix[i], src.Pix[i+1], src.Pix[i+2]).Index >> 4
+			j := src.PixOffset(origin.X+x+1, origin.Y+y)
+			lo := nearest(src.Pix[j], src.Pix[j+1], src.Pix[j+2]).Index & 0x0f
+			frame[12+y*Width/2+x/2] = hi<<4 | lo
+		}
+	}
+	return compressFrame(frame)
+}

@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"image"
 	"image/color"
@@ -105,6 +106,8 @@ type ui struct {
 	// 按钮
 	openButton   widget.Clickable
 	uploadButton widget.Clickable
+	exportButton widget.Clickable
+	hostEditor   widget.Editor
 	modeCropBtn  widget.Clickable
 	modePrevBtn  widget.Clickable
 	rotLeftBtn   widget.Clickable
@@ -138,6 +141,7 @@ type ui struct {
 	openResult chan openResult
 	done       chan ditherResult
 	ditherReq  chan struct{}
+	jobResult  chan string
 }
 
 type openResult struct {
@@ -162,7 +166,7 @@ func newUI(shaper *text.Shaper, initialFile string) *ui {
 		ContrastBg: accentColor,
 		ContrastFg: color.NRGBA{15, 15, 18, 255},
 	}
-	return &ui{
+	ui := &ui{
 		theme:       theme,
 		initialFile: initialFile,
 		algButtons:  make([]widget.Clickable, len(panel.Algorithms())),
@@ -171,7 +175,10 @@ func newUI(shaper *text.Shaper, initialFile string) *ui {
 		openResult:  make(chan openResult, 1),
 		done:        make(chan ditherResult, 1),
 		ditherReq:   make(chan struct{}, 1),
+		jobResult:   make(chan string, 1),
 	}
+	ui.hostEditor.SingleLine = true
+	return ui
 }
 
 func (u *ui) run(w *app.Window) error {
@@ -217,6 +224,10 @@ func (u *ui) run(w *app.Window) error {
 				u.status = u.name + " · " + panel.Algorithms()[u.alg].Name()
 				w.Invalidate()
 			}
+		case text := <-u.jobResult:
+			u.busy = false
+			u.status = text
+			w.Invalidate()
 		default:
 		}
 
@@ -308,7 +319,13 @@ func (u *ui) sidebar(gtx layout.Context) layout.Dimensions {
 			layout.Rigid(gap(6)),
 			layout.Rigid(u.swatches),
 			layout.Rigid(gap(14)),
+			layout.Rigid(u.section("相框地址")),
+			layout.Rigid(gap(6)),
+			layout.Rigid(u.hostField),
+			layout.Rigid(gap(8)),
 			layout.Rigid(u.button("上传到相框", &u.uploadButton, u.onUpload)),
+			layout.Rigid(gap(8)),
+			layout.Rigid(u.button("导出帧文件", &u.exportButton, u.onExport)),
 		)
 	})
 }
@@ -888,12 +905,82 @@ func (u *ui) readImage(file io.ReadCloser) openResult {
 	return openResult{name: name, img: img}
 }
 
+func (u *ui) hostField(gtx layout.Context) layout.Dimensions {
+	gtx.Constraints.Min.X = gtx.Constraints.Max.X
+	editor := material.Editor(u.theme, &u.hostEditor, "192.168.137.42")
+	editor.Color = textColor
+	editor.HintColor = mutedColor
+	editor.TextSize = unit.Sp(14)
+	return editor.Layout(gtx)
+}
+
+func (u *ui) postJob(text string) {
+	u.jobResult <- text
+	if u.window != nil {
+		u.window.Invalidate()
+	}
+}
+
 func (u *ui) onUpload() {
-	if u.preview == nil {
+	if u.rawImage == nil {
 		u.status = "先打开一张图片"
 		return
 	}
-	u.status = "上传还没接上。界面确定之后才会连接相框。"
+	host := u.hostEditor.Text()
+	if host == "" {
+		u.status = "先填写相框地址"
+		return
+	}
+	if u.busy {
+		return
+	}
+	u.busy = true
+	u.status = "正在把当前构图发到 " + host
+	alg, crop, src := u.alg, u.crop, u.rawImage
+	go func() {
+		reply, err := sendPicture(context.Background(), host, 8080, alg, src, crop)
+		if err != nil {
+			u.postJob("没发出去：" + err.Error())
+			return
+		}
+		u.postJob(reply)
+	}()
+}
+
+func (u *ui) onExport() {
+	if u.rawImage == nil {
+		u.status = "先打开一张图片"
+		return
+	}
+	if u.explorer == nil || u.busy {
+		return
+	}
+	u.busy = true
+	u.status = "选择帧文件的保存位置"
+	alg, crop, src := u.alg, u.crop, u.rawImage
+	go func() {
+		file, err := u.explorer.CreateFile("frame.bin")
+		switch {
+		case err == explorer.ErrUserDecline:
+			u.postJob("已取消导出")
+		case err != nil:
+			u.postJob("没能保存：" + err.Error())
+		default:
+			u.postJob(writeExport(file, alg, src, crop))
+		}
+	}()
+}
+
+func writeExport(file io.WriteCloser, alg int, src image.Image, crop panel.Crop) string {
+	defer file.Close()
+	encoded, err := encodePicture(alg, src, crop)
+	if err != nil {
+		return "没能导出：" + err.Error()
+	}
+	if _, err := file.Write(encoded); err != nil {
+		return "没能导出：" + err.Error()
+	}
+	return fmt.Sprintf("已导出 %d 字节的帧文件", len(encoded))
 }
 
 func gap(dp unit.Dp) layout.Widget {
