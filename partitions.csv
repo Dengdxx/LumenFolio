@@ -1,6 +1,7 @@
 # Name,    Type, SubType, Offset,   Size, Flags
 # 16 MB Flash。三个应用槽各 1.5 MB，统一限制 OTA 与 factory 的镜像大小。
-# 保留已部署布局的各分区起点，只把 artifacts 延伸到 0x1000000（16 MB 上界）。
+# 从相同起点的 1.5 MB 槽旧表升级时，仅将 artifacts 延伸到 0x1000000（16 MB 上界）。
+# 2 MB 槽旧表的 artifacts 起点为 0x620000，切换到本表前须迁移资产并重置启动选择。
 # otadata 结束于 0x192000；应用偏移按 64 KB 对齐，ota_0 从 0x1A0000 起。
 # artifacts 前两个 1 MB 槽分别存开机画面和上传帧，其余空间预留给后续资产。
 nvs,       data, nvs,     0x9000,   0x6000,
