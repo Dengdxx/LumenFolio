@@ -203,7 +203,8 @@ void power_guard_task(void *)
             ESP_LOGI(kTag, "收到睡眠请求");
             enter_deep_sleep();
         }
-        // 电脑连着 USB 时也不睡：否则 OTA 和串口都够不着，只剩按键唤醒。
+        // 带 VBUS 的线由 s_plugged 拦住。再看枚举，只为不供电的烧录线：它只有
+        // D+/D-，TP4056 一直报未接充电。这是台面特例，一般不会遇到。
         if (s_sleep_hold || s_plugged || usb_serial_jtag_is_connected() ||
             s_display_state == display_state::busy) {
             continue;
