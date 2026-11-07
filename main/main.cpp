@@ -41,9 +41,9 @@ constexpr uint32_t kEnvPollMs = 5000;
 // 电池采样周期。电压是慢变量，30 s 一次足够，也避免频繁开合分压开关。
 constexpr uint32_t kPowerPollMs = 30000;
 
-// 空闲多久进深睡。只在电池供电时生效：插着电说明人在旁边，而且睡了就收不
-// 到 OTA，所以插电时不做自动睡眠。
-constexpr uint32_t kIdleSleepMs = 30000;
+// 空闲多久进深睡。开发阶段放宽到 5 min：30 s 在台面上频繁打断操作。
+// 只在电池供电且没有 USB 主机时生效；插着电说明人在旁边，睡了也收不到 OTA。
+constexpr uint32_t kIdleSleepMs = 5 * 60 * 1000;
 
 // 最近一次显示到第几张。放进 RTC 内存，深睡唤醒后接着上一张，不会跳回第一张。
 RTC_DATA_ATTR int s_frame_index;
