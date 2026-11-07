@@ -1,4 +1,4 @@
-package main
+package ota
 
 import (
 	"bytes"
@@ -118,7 +118,7 @@ func TestOTASuccessAndLostReplies(t *testing.T) {
 			host, port := otaAddress(t, server)
 			var out, errOut bytes.Buffer
 			// 走真实的命令行入口。界面不经过 run，命令行只分发 ota。
-			code := run(context.Background(), []string{"--host", host, "ota", "--http-port", port, "--wait-timeout", "2s", path}, &out, &errOut)
+			code := Run(context.Background(), host, []string{"--http-port", port, "--wait-timeout", "2s", path}, &out, &errOut)
 			if code != 0 || !strings.Contains(out.String(), "已在 ota_0 启动并确认") {
 				t.Fatalf("code=%d out=%s err=%s", code, &out, &errOut)
 			}
@@ -162,7 +162,7 @@ func TestOTARejectsInvalidInputAndServerErrors(t *testing.T) {
 			defer server.Close()
 			host, port := otaAddress(t, server)
 			var out, errOut bytes.Buffer
-			if runOTA(context.Background(), host, []string{"--http-port", port, path}, &out, &errOut) == 0 {
+			if Run(context.Background(), host, []string{"--http-port", port, path}, &out, &errOut) == 0 {
 				t.Fatal("unexpected success")
 			}
 			mu.Lock()
@@ -178,12 +178,12 @@ func TestOTARejectsInvalidInputAndServerErrors(t *testing.T) {
 	}
 	wrong, _ := otaFixtureImage(t, "another-project", "version")
 	var out, errOut bytes.Buffer
-	if runOTA(context.Background(), "127.0.0.1", []string{wrong}, &out, &errOut) == 0 || !strings.Contains(errOut.String(), "framefilm") {
+	if Run(context.Background(), "127.0.0.1", []string{wrong}, &out, &errOut) == 0 || !strings.Contains(errOut.String(), "framefilm") {
 		t.Fatal("wrong project accepted")
 	}
 	bad := filepath.Join(t.TempDir(), "bootloader.bin")
 	os.WriteFile(bad, make([]byte, 1024), 0600)
-	if runOTA(context.Background(), "127.0.0.1", []string{bad}, &out, &errOut) == 0 {
+	if Run(context.Background(), "127.0.0.1", []string{bad}, &out, &errOut) == 0 {
 		t.Fatal("non-application accepted")
 	}
 }
@@ -247,11 +247,11 @@ func TestOTAResumePendingAndStatus(t *testing.T) {
 	defer server.Close()
 	host, port := otaAddress(t, server)
 	var out, errOut bytes.Buffer
-	if code := runOTA(context.Background(), host, []string{"--http-port", port, "--wait-timeout", "2s", path}, &out, &errOut); code != 0 {
+	if code := Run(context.Background(), host, []string{"--http-port", port, "--wait-timeout", "2s", path}, &out, &errOut); code != 0 {
 		t.Fatalf("%d %s", code, &errOut)
 	}
 	out.Reset()
-	if code := runOTA(context.Background(), host, []string{"--http-port", port, "status"}, &out, &errOut); code != 0 {
+	if code := Run(context.Background(), host, []string{"--http-port", port, "status"}, &out, &errOut); code != 0 {
 		t.Fatalf("%d %s", code, &errOut)
 	}
 	var current otaStatus

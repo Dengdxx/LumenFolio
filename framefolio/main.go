@@ -14,6 +14,8 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strings"
+
+	"framefolio/ota"
 )
 
 // launchGUI 判断这组参数应打开界面还是进入命令行。
@@ -66,7 +68,7 @@ func run(ctx context.Context, args []string, out, errOut io.Writer) int {
 		fmt.Fprintln(errOut, "缺少 --host：设备地址由热点动态分配，填串口日志里打印的 IP")
 		return 2
 	}
-	return runOTA(ctx, *host, global.Args()[1:], out, errOut)
+	return ota.Run(ctx, *host, global.Args()[1:], out, errOut)
 }
 
 func main() {

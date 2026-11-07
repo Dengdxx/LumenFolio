@@ -1,4 +1,4 @@
-package main
+package panel
 
 import (
 	"image"
@@ -7,15 +7,15 @@ import (
 	"math/rand"
 )
 
-// ditherer 把一张图映射到面板的六种墨水上。
-// src 必须已经是 panelWidth×panelHeight，返回的索引图与之等大。
-type ditherer interface {
-	name() string
-	dither(src *image.NRGBA) *image.NRGBA
+// Ditherer 把一张图映射到面板的六种墨水上。
+// src 必须已经是 Width×Height，返回的索引图与之等大。
+type Ditherer interface {
+	Name() string
+	Dither(src *image.NRGBA) *image.NRGBA
 }
 
-func algorithms() []ditherer {
-	return []ditherer{
+func Algorithms() []Ditherer {
+	return []Ditherer{
 		nearestDither{},
 		floydSteinberg{},
 		orderedDither{n: 4},
@@ -27,12 +27,12 @@ func algorithms() []ditherer {
 // nearestDither 每个像素取色差最小的墨水，不扩散误差。
 type nearestDither struct{}
 
-func (nearestDither) name() string { return "最近色" }
+func (nearestDither) Name() string { return "最近色" }
 
-func (nearestDither) dither(src *image.NRGBA) *image.NRGBA {
+func (nearestDither) Dither(src *image.NRGBA) *image.NRGBA {
 	dst := image.NewNRGBA(src.Bounds())
-	for y := range panelHeight {
-		for x := range panelWidth {
+	for y := range Height {
+		for x := range Width {
 			i := src.PixOffset(x, y)
 			put(dst, i, nearest(src.Pix[i], src.Pix[i+1], src.Pix[i+2]))
 		}
@@ -44,13 +44,13 @@ func (nearestDither) dither(src *image.NRGBA) *image.NRGBA {
 // 误差用 int16 累加，避免每次截断成字节后丢掉小数部分。
 type floydSteinberg struct{}
 
-func (floydSteinberg) name() string { return "Floyd-Steinberg" }
+func (floydSteinberg) Name() string { return "Floyd-Steinberg" }
 
-func (floydSteinberg) dither(src *image.NRGBA) *image.NRGBA {
-	w := panelWidth
+func (floydSteinberg) Dither(src *image.NRGBA) *image.NRGBA {
+	w := Width
 	err := make([][3]int16, (w+2)*2)
 	dst := image.NewNRGBA(src.Bounds())
-	for y := range panelHeight {
+	for y := range Height {
 		cur := err[y&1*(w+2) : (y&1+1)*(w+2)]
 		nxt := err[(y&1^1)*(w+2) : (y&1^1+1)*(w+2)]
 		clear(nxt)
@@ -61,7 +61,7 @@ func (floydSteinberg) dither(src *image.NRGBA) *image.NRGBA {
 			b := clamp(int(src.Pix[i+2]) + int(cur[x+1][2])/16)
 			ink := nearest(byte(r), byte(g), byte(b))
 			put(dst, i, ink)
-			spread(cur, nxt, x, int16(r)-int16(ink.preview.R), int16(g)-int16(ink.preview.G), int16(b)-int16(ink.preview.B))
+			spread(cur, nxt, x, int16(r)-int16(ink.Preview.R), int16(g)-int16(ink.Preview.G), int16(b)-int16(ink.Preview.B))
 		}
 	}
 	return dst
@@ -85,14 +85,14 @@ func spread(cur, nxt [][3]int16, x int, er, eg, eb int16) {
 // 偏置幅度取相邻两级墨水的色差，而不是固定常数，这样深浅过渡也能出现纹理。
 type orderedDither struct{ n int }
 
-func (o orderedDither) name() string {
+func (o orderedDither) Name() string {
 	if o.n == 4 {
 		return "Bayer 4×4"
 	}
 	return "Bayer 8×8"
 }
 
-func (o orderedDither) dither(src *image.NRGBA) *image.NRGBA {
+func (o orderedDither) Dither(src *image.NRGBA) *image.NRGBA {
 	matrix := bayer4
 	if o.n == 8 {
 		matrix = bayer8
@@ -100,8 +100,8 @@ func (o orderedDither) dither(src *image.NRGBA) *image.NRGBA {
 	dst := image.NewNRGBA(src.Bounds())
 	mask := o.n - 1
 	scale := 1 / float64(o.n*o.n)
-	for y := range panelHeight {
-		for x := range panelWidth {
+	for y := range Height {
+		for x := range Width {
 			i := src.PixOffset(x, y)
 			threshold := (float64(matrix[(y&mask)*o.n+(x&mask)]) + 0.5) * scale
 			put(dst, i, nearestBiased(src.Pix[i], src.Pix[i+1], src.Pix[i+2], threshold))
@@ -134,13 +134,13 @@ var bayer8 = []byte{
 // 种子固定，同一张图每次出来的结果一样。
 type noiseDither struct{}
 
-func (noiseDither) name() string { return "随机噪声" }
+func (noiseDither) Name() string { return "随机噪声" }
 
-func (noiseDither) dither(src *image.NRGBA) *image.NRGBA {
+func (noiseDither) Dither(src *image.NRGBA) *image.NRGBA {
 	rng := rand.New(rand.NewSource(1))
 	dst := image.NewNRGBA(src.Bounds())
-	for y := range panelHeight {
-		for x := range panelWidth {
+	for y := range Height {
+		for x := range Width {
 			i := src.PixOffset(x, y)
 			put(dst, i, nearestBiased(src.Pix[i], src.Pix[i+1], src.Pix[i+2], rng.Float64()))
 		}
@@ -149,11 +149,11 @@ func (noiseDither) dither(src *image.NRGBA) *image.NRGBA {
 }
 
 // nearest 返回与给定颜色色差最小的墨水。
-func nearest(r, g, b byte) ink {
+func nearest(r, g, b byte) Ink {
 	best := inks[0]
 	bestDist := math.MaxFloat64
 	for _, ink := range inks {
-		if d := distance(r, g, b, ink.preview); d < bestDist {
+		if d := distance(r, g, b, ink.Preview); d < bestDist {
 			best, bestDist = ink, d
 		}
 	}
@@ -162,11 +162,11 @@ func nearest(r, g, b byte) ink {
 
 // nearestBiased 在最近墨水和次近墨水之间按阈值选择。
 // threshold 均匀分布于 [0,1) 时，最近墨水的概率随其色差减小而增大；精确命中墨水时保持原色。
-func nearestBiased(r, g, b byte, threshold float64) ink {
+func nearestBiased(r, g, b byte, threshold float64) Ink {
 	first, second := inks[0], inks[1]
 	firstDist, secondDist := math.MaxFloat64, math.MaxFloat64
 	for _, ink := range inks {
-		d := distance(r, g, b, ink.preview)
+		d := distance(r, g, b, ink.Preview)
 		switch {
 		case d < firstDist:
 			second, secondDist = first, firstDist
@@ -200,9 +200,9 @@ func clamp(v int) int {
 }
 
 // put 把一种墨水的预览色写入像素缓冲。
-func put(dst *image.NRGBA, offset int, ink ink) {
-	dst.Pix[offset] = ink.preview.R
-	dst.Pix[offset+1] = ink.preview.G
-	dst.Pix[offset+2] = ink.preview.B
+func put(dst *image.NRGBA, offset int, ink Ink) {
+	dst.Pix[offset] = ink.Preview.R
+	dst.Pix[offset+1] = ink.Preview.G
+	dst.Pix[offset+2] = ink.Preview.B
 	dst.Pix[offset+3] = 255
 }

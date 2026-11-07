@@ -10,6 +10,8 @@ import (
 	"gioui.org/layout"
 	"gioui.org/op"
 	"gioui.org/unit"
+
+	"framefolio/panel"
 )
 
 func TestPreviewFitsWholeImage(t *testing.T) {
@@ -17,10 +19,10 @@ func TestPreviewFitsWholeImage(t *testing.T) {
 	red := color.NRGBA{255, 0, 0, 255}
 	green := color.NRGBA{0, 255, 0, 255}
 	blue := color.NRGBA{0, 0, 255, 255}
-	u.preview = image.NewNRGBA(image.Rect(0, 0, panelWidth, panelHeight))
+	u.preview = image.NewNRGBA(image.Rect(0, 0, panel.Width, panel.Height))
 	draw.Draw(u.preview, u.preview.Bounds(), image.NewUniform(red), image.Point{}, draw.Src)
-	draw.Draw(u.preview, image.Rect(panelWidth/2, 0, panelWidth, panelHeight/2), image.NewUniform(green), image.Point{}, draw.Src)
-	draw.Draw(u.preview, image.Rect(0, panelHeight/2, panelWidth, panelHeight), image.NewUniform(blue), image.Point{}, draw.Src)
+	draw.Draw(u.preview, image.Rect(panel.Width/2, 0, panel.Width, panel.Height/2), image.NewUniform(green), image.Point{}, draw.Src)
+	draw.Draw(u.preview, image.Rect(0, panel.Height/2, panel.Width, panel.Height), image.NewUniform(blue), image.Point{}, draw.Src)
 	cases := []struct {
 		name       string
 		size       image.Point

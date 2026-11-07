@@ -8,6 +8,8 @@ import (
 	"io"
 	"testing"
 	"testing/synctest"
+
+	"framefolio/panel"
 )
 
 // waitingWindow 模拟空闲的操作系统窗口，只能由 Invalidate 唤醒。
@@ -102,7 +104,7 @@ func TestDitherDeliversNewestResult(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		u := newTestUI()
 		u.rawImage = image.NewNRGBA(image.Rect(0, 0, 12, 16))
-		u.crop = newCrop(u.rawImage.Bounds())
+		u.crop = panel.NewCrop(u.rawImage.Bounds())
 		window := &waitingWindow{wake: make(chan struct{}, 1)}
 		u.window = window
 		u.triggerDither()
@@ -114,7 +116,7 @@ func TestDitherDeliversNewestResult(t *testing.T) {
 		}
 
 		// UI 尚未取走旧结果时再次调整构图，新任务也必须能够交付。
-		u.crop.rotateAroundFrameCenter(90)
+		u.crop.RotateAroundFrameCenter(90)
 		u.triggerDither()
 		wantVersion := u.cropVersion
 		synctest.Wait()

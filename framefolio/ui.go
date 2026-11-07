@@ -28,6 +28,8 @@ import (
 	"gioui.org/widget"
 	"gioui.org/widget/material"
 	"gioui.org/x/explorer"
+
+	"framefolio/panel"
 )
 
 // 界面用的颜色。墨水的预览色另见 inks，不从这里取。
@@ -113,9 +115,9 @@ type ui struct {
 	algButtons   []widget.Clickable
 
 	mode     viewMode
+	crop     panel.Crop
 	alg      int
 	rawImage image.Image  // 打开的原始图片
-	crop     crop         // 当前取景框（平移、旋转、缩放）
 	source   *image.NRGBA // 按取景框采样出的 1200×1600 图
 	preview  *image.NRGBA // 抖动结果
 	name     string
@@ -163,7 +165,7 @@ func newUI(shaper *text.Shaper, initialFile string) *ui {
 	return &ui{
 		theme:       theme,
 		initialFile: initialFile,
-		algButtons:  make([]widget.Clickable, len(algorithms())),
+		algButtons:  make([]widget.Clickable, len(panel.Algorithms())),
 		mode:        modeCrop,
 		status:      "打开一张图片，通过取景框旋转、平移和滚轮缩放选取构图。",
 		openResult:  make(chan openResult, 1),
@@ -198,7 +200,7 @@ func (u *ui) run(w *app.Window) error {
 			default:
 				u.rawImage = result.img
 				u.name = result.name
-				u.crop = newCrop(result.img.Bounds())
+				u.crop = panel.NewCrop(result.img.Bounds())
 				u.mode = modeCrop
 				u.rawImageOp = nil
 				u.rawImageOpSrc = nil
@@ -212,7 +214,7 @@ func (u *ui) run(w *app.Window) error {
 				u.busy = false
 				u.source = result.src
 				u.preview = result.img
-				u.status = u.name + " · " + algorithms()[u.alg].name()
+				u.status = u.name + " · " + panel.Algorithms()[u.alg].Name()
 				w.Invalidate()
 			}
 		default:
@@ -265,10 +267,10 @@ func (u *ui) triggerDither() {
 	img := u.rawImage
 	u.preview = nil
 	u.busy = true
-	u.status = "正在用「" + algorithms()[alg].name() + "」采样并抖动 " + u.name
+	u.status = "正在用「" + panel.Algorithms()[alg].Name() + "」采样并抖动 " + u.name
 	go func() {
-		src := c.sample(img)
-		res := algorithms()[alg].dither(src)
+		src := c.Sample(img)
+		res := panel.Algorithms()[alg].Dither(src)
 		// 由 UI goroutine 按版本丢弃过期结果；队列满时等待，不能把最新结果直接丢掉。
 		u.done <- ditherResult{version: version, alg: alg, src: src, img: res}
 		if u.window != nil {
@@ -338,7 +340,7 @@ func (u *ui) cropControls(gtx layout.Context) layout.Dimensions {
 			return layout.Flex{Axis: layout.Horizontal, Spacing: layout.SpaceBetween}.Layout(gtx,
 				layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
 					if u.rotLeftBtn.Clicked(gtx) {
-						u.crop.rotateAroundFrameCenter(-90)
+						u.crop.RotateAroundFrameCenter(-90)
 						u.triggerDither()
 					}
 					b := material.Button(u.theme, &u.rotLeftBtn, "↺ -90°")
@@ -349,7 +351,7 @@ func (u *ui) cropControls(gtx layout.Context) layout.Dimensions {
 				layout.Rigid(gap(6)),
 				layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
 					if u.rotRightBtn.Clicked(gtx) {
-						u.crop.rotateAroundFrameCenter(90)
+						u.crop.RotateAroundFrameCenter(90)
 						u.triggerDither()
 					}
 					b := material.Button(u.theme, &u.rotRightBtn, "↻ +90°")
@@ -360,7 +362,7 @@ func (u *ui) cropControls(gtx layout.Context) layout.Dimensions {
 				layout.Rigid(gap(6)),
 				layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
 					if u.resetCropBtn.Clicked(gtx) {
-						u.crop = newCrop(u.rawImage.Bounds())
+						u.crop = panel.NewCrop(u.rawImage.Bounds())
 						u.triggerDither()
 					}
 					b := material.Button(u.theme, &u.resetCropBtn, "复位")
@@ -396,10 +398,10 @@ func (u *ui) button(label string, clickable *widget.Clickable, action func()) la
 }
 
 func (u *ui) algorithmList(gtx layout.Context) layout.Dimensions {
-	algs := algorithms()
+	algs := panel.Algorithms()
 	children := make([]layout.FlexChild, len(algs))
 	for index := range algs {
-		children[index] = layout.Rigid(u.algorithm(index, algs[index].name()))
+		children[index] = layout.Rigid(u.algorithm(index, algs[index].Name()))
 	}
 	return layout.Flex{Axis: layout.Vertical}.Layout(gtx, children...)
 }
@@ -452,16 +454,16 @@ func (u *ui) choice(gtx layout.Context, clickable *widget.Clickable, label strin
 
 func (u *ui) swatches(gtx layout.Context) layout.Dimensions {
 	return layout.Flex{Axis: layout.Horizontal, Spacing: layout.SpaceBetween}.Layout(gtx,
-		layout.Rigid(u.swatch(inks[0])),
-		layout.Rigid(u.swatch(inks[1])),
-		layout.Rigid(u.swatch(inks[2])),
-		layout.Rigid(u.swatch(inks[3])),
-		layout.Rigid(u.swatch(inks[4])),
-		layout.Rigid(u.swatch(inks[5])),
+		layout.Rigid(u.swatch(panel.Inks()[0])),
+		layout.Rigid(u.swatch(panel.Inks()[1])),
+		layout.Rigid(u.swatch(panel.Inks()[2])),
+		layout.Rigid(u.swatch(panel.Inks()[3])),
+		layout.Rigid(u.swatch(panel.Inks()[4])),
+		layout.Rigid(u.swatch(panel.Inks()[5])),
 	)
 }
 
-func (u *ui) swatch(ink ink) layout.Widget {
+func (u *ui) swatch(ink panel.Ink) layout.Widget {
 	return func(gtx layout.Context) layout.Dimensions {
 		size := gtx.Dp(unit.Dp(26))
 		return layout.Flex{Axis: layout.Vertical, Alignment: layout.Middle}.Layout(gtx,
@@ -469,12 +471,12 @@ func (u *ui) swatch(ink ink) layout.Widget {
 				gtx.Constraints.Min = image.Point{X: size, Y: size}
 				gtx.Constraints.Max = gtx.Constraints.Min
 				rect := clip.RRect{Rect: image.Rectangle{Max: gtx.Constraints.Min}, SE: 4, SW: 4, NW: 4, NE: 4}
-				paint.FillShape(gtx.Ops, ink.preview, rect.Op(gtx.Ops))
+				paint.FillShape(gtx.Ops, ink.Preview, rect.Op(gtx.Ops))
 				return layout.Dimensions{Size: gtx.Constraints.Min}
 			}),
 			layout.Rigid(gap(3)),
 			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-				label := material.Caption(u.theme, ink.name)
+				label := material.Caption(u.theme, ink.Name)
 				label.Color = mutedColor
 				return label.Layout(gtx)
 			}),
@@ -604,7 +606,7 @@ func (u *ui) cropView(gtx layout.Context) layout.Dimensions {
 	// 1. 固定取景框在当前视口中央，严格保持 1200:1600 面板比例
 	margin := gtx.Dp(unit.Dp(24))
 	frameRect := frameRectOnScreen(viewRect, margin)
-	sScreen := float64(frameRect.Dx()) / float64(panelWidth)
+	sScreen := float64(frameRect.Dx()) / float64(panel.Width)
 	fc := image.Pt(frameRect.Min.X+frameRect.Dx()/2, frameRect.Min.Y+frameRect.Dy()/2)
 
 	// 顶部固定旋转把手位置（在固定取景框顶部上方 24dp）
@@ -638,7 +640,7 @@ func (u *ui) cropView(gtx layout.Context) layout.Dimensions {
 			} else if e.Scroll.Y > 0 {
 				factor = 0.92 // 向下滚轮缩小图片
 			}
-			u.crop.zoom(factor, anchorX, anchorY)
+			u.crop.Zoom(factor, anchorX, anchorY)
 			u.scheduleDither()
 			continue
 		}
@@ -669,17 +671,17 @@ func (u *ui) cropView(gtx layout.Context) layout.Dimensions {
 		op := paint.NewImageOp(u.rawImage)
 		u.rawImageOp = &op
 	}
-	cxImg := float64(u.crop.bounds.Min.X) + float64(u.crop.bounds.Dx())/2.0
-	cyImg := float64(u.crop.bounds.Min.Y) + float64(u.crop.bounds.Dy())/2.0
-	scX := float32(float64(fc.X) + u.crop.ox*sScreen)
-	scY := float32(float64(fc.Y) + u.crop.oy*sScreen)
-	sPhoto := float32(u.crop.scale * sScreen)
+	cxImg := float64(u.crop.Bounds.Min.X) + float64(u.crop.Bounds.Dx())/2.0
+	cyImg := float64(u.crop.Bounds.Min.Y) + float64(u.crop.Bounds.Dy())/2.0
+	scX := float32(float64(fc.X) + u.crop.OX*sScreen)
+	scY := float32(float64(fc.Y) + u.crop.OY*sScreen)
+	sPhoto := float32(u.crop.Scale * sScreen)
 
 	// 限制原图在 viewRect 内渲染
 	viewClip := clip.Rect(viewRect).Push(gtx.Ops)
 	trans := f32.AffineId().Offset(f32.Pt(-float32(cxImg), -float32(cyImg)))
 	trans = trans.Scale(f32.Point{}, f32.Pt(sPhoto, sPhoto))
-	trans = trans.Rotate(f32.Point{}, float32(u.crop.angle))
+	trans = trans.Rotate(f32.Point{}, float32(u.crop.Angle))
 	trans = trans.Offset(f32.Pt(scX, scY))
 	imgClip := op.Affine(trans).Push(gtx.Ops)
 	u.rawImageOp.Add(gtx.Ops)
@@ -757,7 +759,7 @@ func (u *ui) cropView(gtx layout.Context) layout.Dimensions {
 	paint.FillShape(gtx.Ops, color.NRGBA{255, 255, 255, 255}, clip.Ellipse(irect).Op(gtx.Ops))
 
 	// 10. 旋转角度指示徽标（非零时显示）
-	deg := u.crop.angle * 180 / math.Pi
+	deg := u.crop.Angle * 180 / math.Pi
 	deg = math.Mod(deg, 360)
 	if deg > 180 {
 		deg -= 360
@@ -798,10 +800,10 @@ func (u *ui) picture(gtx layout.Context) layout.Dimensions {
 		}
 		max := gtx.Constraints.Max
 		width := max.X
-		height := width * panelHeight / panelWidth
+		height := width * panel.Height / panel.Width
 		if height > max.Y {
 			height = max.Y
-			width = height * panelWidth / panelHeight
+			width = height * panel.Width / panel.Height
 		}
 		imageOp := paint.NewImageOp(u.preview)
 		imageOp.Filter = paint.FilterNearest

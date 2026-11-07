@@ -1,4 +1,6 @@
-package main
+// Package ota 是相框的局域网固件升级客户端。
+// 命令行和界面都调用这里：界面不解析命令行，命令行也不进入界面。
+package ota
 
 // 本文件实现局域网 OTA：通过 HTTP 查询状态、流式上传应用镜像、等待重启并确认新固件。
 import (
@@ -256,7 +258,7 @@ func uploadOTA(ctx context.Context, client *http.Client, base string, file *os.F
 // 默认 3 分钟，--wait-timeout 默认 90 秒。上传前校验工程、槽容量和设备空闲状态；
 // 若目标版本和镜像标识已在运行槽启动但待确认，则跳过上传直接继续确认。
 // 返回进程退出码：0 成功，1 运行期错误，2 用法错误。
-func runOTA(ctx context.Context, host string, args []string, out, errOut io.Writer) int {
+func Run(ctx context.Context, host string, args []string, out, errOut io.Writer) int {
 	flags := flag.NewFlagSet("ota", flag.ContinueOnError)
 	flags.SetOutput(errOut)
 	port := flags.Int("http-port", 8080, "设备 OTA HTTP 端口")

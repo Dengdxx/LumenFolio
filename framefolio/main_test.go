@@ -12,6 +12,8 @@ import (
 	"gioui.org/op"
 	"gioui.org/text"
 	"gioui.org/unit"
+
+	"framefolio/panel"
 )
 
 func newTestUI() *ui {
@@ -37,7 +39,7 @@ func TestCropPointerGestures(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			u := newTestUI()
 			u.rawImage = image.NewNRGBA(image.Rect(0, 0, 120, 160))
-			u.crop = newCrop(u.rawImage.Bounds())
+			u.crop = panel.NewCrop(u.rawImage.Bounds())
 			t.Cleanup(func() {
 				if u.ditherTimer != nil {
 					u.ditherTimer.Stop()
@@ -58,11 +60,11 @@ func TestCropPointerGestures(t *testing.T) {
 				r.Queue(pointer.Event{Kind: pointer.Move, Source: pointer.Mouse, Buttons: tc.button, Position: p})
 				frame()
 			}
-			if panned := u.crop.ox != 0 || u.crop.oy != 0; panned != tc.pan {
-				t.Errorf("平移状态应为 %v，实际偏移 (%.2f, %.2f)", tc.pan, u.crop.ox, u.crop.oy)
+			if panned := u.crop.OX != 0 || u.crop.OY != 0; panned != tc.pan {
+				t.Errorf("平移状态应为 %v，实际偏移 (%.2f, %.2f)", tc.pan, u.crop.OX, u.crop.OY)
 			}
-			if rotated := u.crop.angle != 0; rotated != tc.rotate {
-				t.Errorf("旋转状态应为 %v，实际角度 %.3f", tc.rotate, u.crop.angle)
+			if rotated := u.crop.Angle != 0; rotated != tc.rotate {
+				t.Errorf("旋转状态应为 %v，实际角度 %.3f", tc.rotate, u.crop.Angle)
 			}
 			last := tc.moves[len(tc.moves)-1]
 			r.Queue(pointer.Event{Kind: pointer.Release, Source: pointer.Mouse, Position: last})
@@ -80,8 +82,8 @@ func TestCropPointerGestures(t *testing.T) {
 func TestCanvasHeaderTabsSwitchMode(t *testing.T) {
 	u := newTestUI()
 	u.rawImage = image.NewNRGBA(image.Rect(0, 0, 120, 160))
-	u.crop = newCrop(u.rawImage.Bounds())
-	u.preview = image.NewNRGBA(image.Rect(0, 0, panelWidth, panelHeight))
+	u.crop = panel.NewCrop(u.rawImage.Bounds())
+	u.preview = image.NewNRGBA(image.Rect(0, 0, panel.Width, panel.Height))
 	var r input.Router
 	var ops op.Ops
 	gtx := layout.Context{Ops: &ops, Source: r.Source(), Metric: unit.Metric{PxPerDp: 1, PxPerSp: 1}, Constraints: layout.Exact(image.Pt(1180, 760))}
