@@ -6,34 +6,35 @@
 
 ## 分区
 
-8 MB Flash，`partitions.csv`：
+16 MB Flash（16,777,216 字节），布局以 `partitions.csv` 为准：
 
 | 分区 | 偏移 | 大小 |
 | --- | --- | --- |
 | nvs | 0x9000 | 0x6000 |
 | phy_init | 0xF000 | 0x1000 |
-| factory | 0x10000 | 0x200000 |
-| otadata | 0x210000 | 0x2000 |
-| ota_0 | 0x220000 | 0x200000 |
-| ota_1 | 0x420000 | 0x200000 |
-| artifacts | 0x620000 | 0x1E0000 |
+| factory | 0x10000 | 0x180000 |
+| otadata | 0x190000 | 0x2000 |
+| ota_0 | 0x1A0000 | 0x180000 |
+| ota_1 | 0x320000 | 0x180000 |
+| artifacts | 0x4A0000 | 0xB60000 |
 
-otadata 结束于 0x212000，但应用分区偏移必须按 64 KB 对齐，所以 ota_0 从 0x220000 起，中间空出的 56 KB 不使用。两个 OTA 槽与 factory 等大：包括金色 factory 在内的任何镜像都必须装进 0x200000（2,097,152 字节）。取 2 MB 是按早期把开机画面嵌进应用、合计约 1.79 MB 定的；画面移到 artifacts 之后应用降到约 891 KB，槽位暂未缩小。
+otadata 结束于 0x192000，应用偏移必须按 64 KB 对齐，所以 ota_0 从 0x1A0000 起，中间的 56 KB 不使用。三个应用槽各 1.5 MB，任何镜像都必须装进 0x180000（1,572,864 字节）；当前约 1.02 MB 的应用保留约 0.48 MB 余量。
 
-artifacts 从 ota_1 结束处 0x620000 起，占满剩余的 0x1E0000，放开机画面和之后的其他资产。它不随应用 OTA 更新：换图只重烧这一段，升级固件也不会覆盖它。
+artifacts 从 0x4A0000 延伸到 0x1000000，容量为 11.375 MiB。前 1 MiB 放开机画面，第二个 1 MiB 预留为上传槽，其余空间预留。保留已部署分区的起点和应用槽大小，只扩大最后的资产分区，避免搬移 NVS 和已有图片。应用 OTA 不覆盖资产分区。
 
-## 首次部署
+## 首次部署与容量更新
 
-OTA 只更新应用槽，不更新 bootloader 和分区表。改过分区表、或设备上还没有带 rollback 的 bootloader 时，必须整片擦除后有线烧录一次：
+OTA 只更新应用槽，不更新 bootloader、Flash 容量配置或分区表。首次部署和从 8 MB 配置扩展到 16 MB 时，先有线写入完整固件：
 
-```powershell
-idf.py erase-flash
+```bash
 idf.py flash monitor
 ```
 
-之后的日常升级走无线，不再擦除。`erase-flash` 会清掉 NVS 和 otadata，等于回到 factory。
+烧录前核对设备的分区表：若各分区起点与本表相同，只是扩大 artifacts 的末尾，可以直接更新而不整片擦除，NVS 和已有图片无需搬移。若旧表的起点不同，应先停止烧录并迁移数据，不能把另一种布局直接套上去。
 
-已使用当前分区表和回滚 bootloader 的旧品牌设备，首次迁移时用 USB 执行 `idf.py flash monitor`。这会写入 FrameFolio factory 镜像并重置 otadata，保留 NVS 和 artifacts。旧固件的 OTA 会拒绝工程名不同的镜像。
+完整烧录会写入 factory 并重置 otadata；应用和启动选择会更新，NVS 和未列入烧录参数的资产区域保留。只有明确需要清空设备时才使用 `idf.py erase-flash`，该操作会删除 NVS、图片和 OTA 状态，容量更新本身不要求它。
+
+旧品牌固件的 OTA 会拒绝工程名不同的镜像，首次迁移同样走 USB；之后的日常升级走无线。
 
 ## 日常升级
 
@@ -106,19 +107,19 @@ Invoke-RestMethod -Method Post -Uri "$device/ota/confirm" -Headers @{
 
 确认之后才暴露的问题不在自动回滚范围内。本板不启用 bootloader 的按键恢复工厂：`CONFIG_BOOTLOADER_FACTORY_RESET` 依赖的 GPIO3 在这块板上是 KEY1，正常按键会被当成恢复操作，而且 GPIO3 是启动绑带脚。确认后发现固件有问题，用 USB 重新烧录 factory：
 
-```powershell
-idf.py erase-flash
+```bash
 idf.py flash
 ```
 
 ## 易错点（务必遵守）
 
-- 现象：上传返回「设备没有 OTA 槽」或 `capacity` 为 0。原因：设备上仍是旧分区表，只有 factory。解决：按「首次部署」执行一次 `idf.py erase-flash` 再 `idf.py flash`，OTA 更新不了分区表。
+- 现象：上传返回「设备没有 OTA 槽」或 `capacity` 为 0。原因：设备仍是只有 factory 的旧分区表，OTA 不会改分区。解决：按「首次部署与容量更新」核对旧数据位置，再有线更新分区表和固件，不要默认整片擦除。
 - 现象：新镜像每次都在约一分钟后自己重启回旧版本。原因：没调用 `otaServiceReady()`，或 `CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE` 没进 sdkconfig（本地残留的 sdkconfig 会压过 sdkconfig.defaults）。解决：确认 `app_main` 末尾调用了 `otaServiceReady()`，并在生成的 sdkconfig 里grep 到 `CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y`。
-- 现象：改了分区表后启动异常、NVS 报错或分区重叠。原因：Flash 上还留着旧分区表和旧 otadata。解决：改分区表后必须 `idf.py erase-flash` 一次。
+- 现象：改了分区表后启动异常、NVS 报错或分区重叠。原因：新旧布局的起点不同，或启动选择仍指向旧槽。解决：先核对旧表；起点相同且仅扩大资产区时可有线更新，起点不同时先迁移数据，不要盲目整片擦除。
+- 现象：16 MB Flash 仍按 8 MB 使用。原因：生成的 sdkconfig 覆盖了新的默认配置。解决：确认 `CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y` 和 `CONFIG_ESPTOOLPY_FLASHSIZE="16MB"`，重新构建并有线更新 bootloader 和分区表；8 MiB 上界是 `0x800000`，16 MiB 上界才是 `0x1000000`，都不可越界访问。
 - 现象：上传过程中屏幕花掉或设备崩溃。原因：`esp_ota_write` 写 Flash 时会关闭 cache，而帧缓冲放在 PSRAM 里，这段窗口内访问 PSRAM 会出错。解决：上传期间不要刷新屏幕；开机那次自检刷屏也要错开上传。
-- 现象：现有 Go 地面站拒绝上传 `FrameFolio.bin`。原因：它在本地校验的是旧工程名。解决：按「日常升级」直接调用设备 HTTP 接口。
+- 现象：FrameFolio 桌面端的 `ota` 命令拒绝上传 `FrameFolio.bin`。原因：它在本地校验的是旧工程名。解决：按「日常升级」直接调用设备 HTTP 接口。
 - 现象：设备返回 HTTP 422，提示 `ESP_ERR_INVALID_ARG`。原因：上传的镜像与运行中的固件工程名不同。解决：用 `GET /ota/status` 检查 `project`，旧品牌设备先按「首次部署」走 USB 迁移，已迁移设备使用 `idf.py build` 生成的 `build/FrameFolio.bin`。
 - 现象：待确认期间 NVS 初始化失败后参数全没了。原因：在待确认状态下擦除了 NVS，回滚回去的旧镜像依赖这些数据。解决：保持 `app_main` 里的判断，`otaServicePendingVerification()` 为 true 时不得调用 `nvs_flash_erase()`。
 - 现象：按 KEY1 时设备意外回到 factory 或改变启动模式。原因：打开了 `CONFIG_BOOTLOADER_FACTORY_RESET` 且绑在 GPIO3 上。解决：不要添加该项，sdkconfig 里不应出现 `CONFIG_BOOTLOADER_FACTORY_RESET`。
-- 现象：镜像能编译但烧不进去，或 OTA 槽装不下。原因：应用超过 0x200000。解决：用 `idf.py size` 确认应用小于 2,097,152 字节；超出就减体积，不要加大 factory，OTA 槽与它等大。
+- 现象：镜像能编译但烧不进去，或 OTA 槽装不下。原因：应用超过 0x180000。解决：用 `idf.py size` 确认应用小于 1,572,864 字节；超出就减体积，不要加大 factory，OTA 槽与它等大。

@@ -1,13 +1,12 @@
 # Name,    Type, SubType, Offset,   Size, Flags
-# 8 MB Flash。factory 取 2 MB：Wi-Fi 与 OTA 加进来后应用约 1.79 MB，1.5 MB 装不下。
-# 任何镜像都必须装进这个尺寸，OTA 槽与它等大。
-# otadata 结束于 0x212000，而应用分区偏移必须 64 KB 对齐，所以 ota_0 从 0x220000 起。
-# artifacts 从 ota_1 结束处 0x620000 起，占满剩余的 0x1E0000。系统图和其他资产放这里，
-# 不进应用镜像：升级固件不覆盖它，换图也不用重烧应用。
+# 16 MB Flash。三个应用槽各 1.5 MB，统一限制 OTA 与 factory 的镜像大小。
+# 保留已部署布局的各分区起点，只把 artifacts 延伸到 0x1000000（16 MB 上界）。
+# otadata 结束于 0x192000；应用偏移按 64 KB 对齐，ota_0 从 0x1A0000 起。
+# artifacts 前两个 1 MB 槽分别存开机画面和上传帧，其余空间预留给后续资产。
 nvs,       data, nvs,     0x9000,   0x6000,
 phy_init,  data, phy,     0xF000,   0x1000,
-factory,   app,  factory, 0x10000,  0x200000,
-otadata,   data, ota,     0x210000, 0x2000,
-ota_0,     app,  ota_0,   0x220000, 0x200000,
-ota_1,     app,  ota_1,   0x420000, 0x200000,
-artifacts, data, 0x40,    0x620000, 0x1E0000,
+factory,   app,  factory, 0x10000,  0x180000,
+otadata,   data, ota,     0x190000, 0x2000,
+ota_0,     app,  ota_0,   0x1A0000, 0x180000,
+ota_1,     app,  ota_1,   0x320000, 0x180000,
+artifacts, data, 0x40,    0x4A0000, 0xB60000,

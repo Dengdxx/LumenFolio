@@ -1,7 +1,7 @@
 """把一张图按比例放进 1200×1600，用半强度 Floyd–Steinberg 抖成 Spectra 6 六色。
 
 用法：python make_frame.py <图片>
-输出 main/boot_frame.bin。它不进应用镜像，烧录时写到 artifacts 分区（0x620000）。
+输出 main/boot_frame.bin。它不进应用镜像，烧录时写到 artifacts 分区的开头（0x4A0000）。分区后接的 1 MB 是局域网上传槽，烧开机画面时不要覆盖。
 帧格式与 make_schematic_frame.py 的 pack() 一致。预览写在 .cache。
 """
 
