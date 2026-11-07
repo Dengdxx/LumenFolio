@@ -1,8 +1,11 @@
+#include <cstdarg>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
-#include <cstdio>
 
+#include "app.h"
 #include "artifacts.h"
+#include "console.h"
 #include "board_i2c.h"
 #include "board_init.h"
 #include "board_keys.h"
@@ -47,6 +50,41 @@ RTC_DATA_ATTR int s_frame_index;
 
 // 是否接着充电器。power_task 每 30 s 写一次，display_task 读，单字节不加锁。
 bool s_plugged;
+
+/** @brief 显示任务的运行状态，只给控制台的 status 命令看。 */
+enum class display_state { starting, idle, busy, dead };
+display_state s_display_state = display_state::starting;
+const char *s_last_result = "-";   // 最近一次刷屏的结果，指向字符串常量
+framefolio::board_sleep::wake_info s_wake;  // 本次启动的唤醒来源，开机时填一次
+int s_frame_count;                 // 卡上帧文件数量，显示任务每次扫描后更新
+int64_t s_idle_since_us;           // 上一次有命令的时刻
+volatile bool s_sleep_requested;   // 控制台要求立刻睡
+volatile bool s_sleep_hold;        // 本次开机不自动睡（台面调试用）
+
+const char *display_state_name()
+{
+    switch (s_display_state) {
+    case display_state::starting: return "starting";
+    case display_state::idle:     return "idle";
+    case display_state::busy:     return "busy";
+    default:                      return "dead";
+    }
+}
+
+/** @brief 往缓冲末尾追加一行，装不下就丢掉这一段。 */
+void append(char *buf, size_t size, size_t *used, const char *fmt, ...)
+{
+    if (*used + 1 >= size) {
+        return;
+    }
+    va_list args;
+    va_start(args, fmt);
+    const int written = vsnprintf(buf + *used, size - *used, fmt, args);
+    va_end(args);
+    if (written > 0 && static_cast<size_t>(written) < size - *used) {
+        *used += static_cast<size_t>(written);
+    }
+}
 
 const char *charge_name(board_charge_t charge)
 {
@@ -151,26 +189,38 @@ bool show_card_frame(int index, int count)
 }
 
 /**
- * @brief 现在能不能进深睡。
+ * @brief 电源守护任务：决定什么时候睡。
  *
- * @param[in] idle_since_us 上一次有命令入队的时刻。
- * @return 电池供电、空闲够久、且没有 OTA 在写 Flash 时返回 true。
+ * 单独一个任务，不挂在显示任务上——显示任务初始化失败退出、或者卡在刷屏里，
+ * 设备照样要能睡着，否则电池会一直耗到没电。屏幕上有没有画面是另一回事。
  */
-bool sleep_allowed(int64_t idle_since_us)
+void power_guard_task(void *)
 {
-    if (s_plugged) {
-        return false;
-    }
-    if (esp_timer_get_time() - idle_since_us < static_cast<int64_t>(kIdleSleepMs) * 1000) {
-        return false;
-    }
-    otaStatus_t status = {};
-    otaUpdateGetStatus(&status);
-    return status.phase == otaIdle;  // 传固件时睡着会中断，留到下次空闲再睡
-}
+    for (;;) {
+        vTaskDelay(pdMS_TO_TICKS(1000));
 
-/** @brief 刷屏命令。按键、串口、HTTP 三个来源都投到这里，由显示任务串行执行。 */
-enum class display_cmd { refresh, next, prev, factory, sleep };
+        if (s_sleep_requested) {
+            ESP_LOGI(kTag, "收到睡眠请求");
+            enter_deep_sleep();
+        }
+        // 电脑连着 USB 时也不睡：否则 OTA 和串口都够不着，只剩按键唤醒。
+        if (s_sleep_hold || s_plugged || usb_serial_jtag_is_connected() ||
+            s_display_state == display_state::busy) {
+            continue;
+        }
+        if (esp_timer_get_time() - s_idle_since_us < static_cast<int64_t>(kIdleSleepMs) * 1000) {
+            continue;
+        }
+        otaStatus_t status = {};
+        otaUpdateGetStatus(&status);
+        if (status.phase != otaIdle) {
+            continue;  // 传固件时睡着会中断，留到下次空闲再睡
+        }
+
+        ESP_LOGI(kTag, "空闲 %u ms 且未接充电器，进入深度睡眠", (unsigned)kIdleSleepMs);
+        enter_deep_sleep();
+    }
+}
 
 /** @brief 按键语义转成刷屏命令。KEY3 没有翻页含义，当作原地重刷。 */
 display_cmd cmd_for_key(board_key_t key)
@@ -184,13 +234,7 @@ display_cmd cmd_for_key(board_key_t key)
 
 QueueHandle_t s_cmds;
 
-esp_err_t post_display_cmd(display_cmd cmd)
-{
-    if (s_cmds == nullptr) {
-        return ESP_ERR_INVALID_STATE;
-    }
-    return xQueueSend(s_cmds, &cmd, 0) == pdTRUE ? ESP_OK : ESP_ERR_NO_MEM;
-}
+// 投递入口 app_post_display() 在文件末尾实现，控制台和按键都走它。
 
 /** @brief 卡上没有帧文件时的退路：artifacts 里的画面，再没有就白屏。 */
 bool refresh_fallback()
@@ -204,128 +248,89 @@ bool refresh_fallback()
 }
 
 /**
- * @brief 调试串口输入：r 刷新、n 下一张、p 上一张。
+ * @brief 调试串口控制台：按行收，回车执行。
  *
- * 串口是 USB-SERIAL-JTAG，和日志同一个口，这里只读不写。
+ * 命令语义全在 console.cpp，和 HTTP 的 /console 完全一致；这里只做收字节、
+ * 回显、按行切分。串口是 USB-SERIAL-JTAG，和日志同一个口。
  */
 void serial_cmd_task(void *)
 {
+    char line[64] = {};
+    size_t length = 0;
+
     for (;;) {
         uint8_t ch = 0;
         if (usb_serial_jtag_read_bytes(&ch, 1, pdMS_TO_TICKS(500)) != 1) {
             continue;
         }
-        switch (ch) {
-        case 'r':
-        case 'R':
-            post_display_cmd(display_cmd::refresh);
-            break;
-        case 'n':
-        case 'N':
-            post_display_cmd(display_cmd::next);
-            break;
-        case 'p':
-        case 'P':
-            post_display_cmd(display_cmd::prev);
-            break;
-        case 'f':
-        case 'F':
-            post_display_cmd(display_cmd::factory);
-            break;
-        case 's':
-        case 'S':
-            post_display_cmd(display_cmd::sleep);
-            break;
-        case '\r':
-        case '\n':
-            break;
-        default:
-            ESP_LOGI(kTag, "串口命令：r 刷新 / n 下一张 / p 上一张 / f 出厂画面 / s 立即深睡");
-            break;
+
+        if (ch == '\r' || ch == '\n') {
+            if (length == 0) {
+                continue;
+            }
+            line[length] = '\0';
+            char out[512] = {};
+            console_execute(line, out, sizeof(out));
+            // 回执自带换行，去掉行尾再交给日志，免得每次多一个空行。
+            for (size_t i = strlen(out); i > 0 && out[i - 1] == '\n'; --i) {
+                out[i - 1] = '\0';
+            }
+            ESP_LOGI(kTag, "%s", out);
+            length = 0;
+            continue;
+        }
+
+        if (ch == 0x08 || ch == 0x7f) {  // 退格
+            if (length > 0) {
+                --length;
+            }
+            continue;
+        }
+
+        if (ch >= 0x20 && ch < 0x7f && length + 1 < sizeof(line)) {
+            line[length++] = static_cast<char>(ch);
+            usb_serial_jtag_write_bytes(&ch, 1, 0);  // 回显，不然串口上看不到自己敲的字
         }
     }
 }
 
-esp_err_t reply_display_cmd(httpd_req_t *request, display_cmd cmd, const char *text)
+/**
+ * @brief HTTP 控制台：GET /console?cmd=<命令>。
+ *
+ * 和串口共用 console_execute()，回执文本也完全一样。
+ */
+esp_err_t handle_http_console(httpd_req_t *request)
 {
-    post_display_cmd(cmd);
+    char query[160] = {};
+    char cmd[96] = {};
+
     httpd_resp_set_type(request, "text/plain");
-    return httpd_resp_sendstr(request, text);
-}
+    if (httpd_req_get_url_query_str(request, query, sizeof(query)) != ESP_OK ||
+        httpd_query_key_value(query, "cmd", cmd, sizeof(cmd)) != ESP_OK) {
+        return httpd_resp_sendstr(request, "用法：/console?cmd=<命令>，命令表见 cmd=help\n");
+    }
 
-esp_err_t handle_http_refresh(httpd_req_t *request)
-{
-    return reply_display_cmd(request, display_cmd::refresh, "refresh queued\n");
-}
-
-esp_err_t handle_http_next(httpd_req_t *request)
-{
-    return reply_display_cmd(request, display_cmd::next, "next queued\n");
-}
-
-esp_err_t handle_http_prev(httpd_req_t *request)
-{
-    return reply_display_cmd(request, display_cmd::prev, "prev queued\n");
-}
-
-esp_err_t handle_http_factory(httpd_req_t *request)
-{
-    return reply_display_cmd(request, display_cmd::factory, "factory queued\n");
-}
-
-esp_err_t handle_http_sleep(httpd_req_t *request)
-{
-    return reply_display_cmd(request, display_cmd::sleep, "sleep queued\n");
+    char out[512] = {};
+    console_execute(cmd, out, sizeof(out));
+    return httpd_resp_sendstr(request, out);
 }
 
 // 路由结构必须活到 HTTP 服务结束，所以放静态存储，启动时填一次。
-httpd_uri_t s_uri_refresh;
-httpd_uri_t s_uri_next;
-httpd_uri_t s_uri_prev;
-httpd_uri_t s_uri_factory;
-httpd_uri_t s_uri_sleep;
+httpd_uri_t s_uri_console;
 
-void register_display_routes()
+void register_console_route()
 {
-    s_uri_refresh = {};
-    s_uri_refresh.uri = "/display/refresh";
-    s_uri_refresh.method = HTTP_GET;
-    s_uri_refresh.handler = handle_http_refresh;
+    s_uri_console = {};
+    s_uri_console.uri = "/console";
+    s_uri_console.method = HTTP_GET;
+    s_uri_console.handler = handle_http_console;
 
-    s_uri_next = {};
-    s_uri_next.uri = "/display/next";
-    s_uri_next.method = HTTP_GET;
-    s_uri_next.handler = handle_http_next;
-
-    s_uri_prev = {};
-    s_uri_prev.uri = "/display/prev";
-    s_uri_prev.method = HTTP_GET;
-    s_uri_prev.handler = handle_http_prev;
-
-    s_uri_factory = {};
-    s_uri_factory.uri = "/display/factory";
-    s_uri_factory.method = HTTP_GET;
-    s_uri_factory.handler = handle_http_factory;
-
-    s_uri_sleep = {};
-    s_uri_sleep.uri = "/power/sleep";
-    s_uri_sleep.method = HTTP_GET;
-    s_uri_sleep.handler = handle_http_sleep;
-
-    const esp_err_t first = otaServiceRegisterHandler(&s_uri_refresh);
-    const esp_err_t second = otaServiceRegisterHandler(&s_uri_next);
-    const esp_err_t third = otaServiceRegisterHandler(&s_uri_prev);
-    const esp_err_t fourth = otaServiceRegisterHandler(&s_uri_factory);
-    const esp_err_t fifth = otaServiceRegisterHandler(&s_uri_sleep);
-
-    const esp_err_t results[] = {first, second, third, fourth, fifth};
-    for (const esp_err_t err : results) {
-        if (err != ESP_OK) {
-            ESP_LOGE(kTag, "控制接口注册失败：%s", esp_err_to_name(err));
-            return;
-        }
+    const esp_err_t err = otaServiceRegisterHandler(&s_uri_console);
+    if (err != ESP_OK) {
+        ESP_LOGE(kTag, "控制台接口注册失败：%s", esp_err_to_name(err));
+        return;
     }
-    ESP_LOGI(kTag, "控制接口：GET /display/refresh|next|prev|factory、/power/sleep");
+    ESP_LOGI(kTag, "控制台：串口按行输入，HTTP 用 GET /console?cmd=<命令>");
 }
 
 /**
@@ -343,6 +348,8 @@ void display_task(void *)
 
     if (initEPD() != DONE) {
         ESP_LOGE(kTag, "EPD init 失败：BUSY 未拉高，先查 3V3_EXT(POWER_CTL) / RST / BUSY 走线");
+        s_display_state = display_state::dead;
+        s_last_result = "epd-init-failed";
         led_event_post(LED_EV_ANOMALY, 0);
         vTaskDelete(nullptr);
         return;
@@ -357,127 +364,158 @@ void display_task(void *)
             ESP_LOGE(kTag, "六色条纹刷新失败");
             led_event_post(LED_EV_ANOMALY, 0);
         }
+        s_display_state = display_state::dead;
+        s_last_result = "no-fb";
         vTaskDelete(nullptr);  // 没有帧缓冲，翻页也无从谈起
         return;
     }
 
-    QueueSetHandle_t set = xQueueCreateSet(16);
-    if (set == nullptr || xQueueAddToSet(board_keys_queue(), set) != pdPASS ||
-        xQueueAddToSet(s_cmds, set) != pdPASS) {
-        ESP_LOGE(kTag, "命令队列集合创建失败");
-        vTaskDelete(nullptr);
-        return;
-    }
+    s_idle_since_us = esp_timer_get_time();
+    s_display_state = display_state::idle;
 
-    // 最后一次有命令的时刻，深睡判断拿它算空闲时长。
-    int64_t idle_since = esp_timer_get_time();
+    // 按键队列可能为 NULL（按键初始化失败），照样要能刷屏，所以先取出来判空。
+    QueueHandle_t keys = board_keys_queue();
+
     for (;;) {
-        // 等命令的同时每秒醒一次，看看是不是该睡了。
-        const QueueSetMemberHandle_t active = xQueueSelectFromSet(set, pdMS_TO_TICKS(1000));
-        if (active == nullptr) {
-            if (sleep_allowed(idle_since)) {
-                ESP_LOGI(kTag, "空闲 %u ms 且未接充电器，进入深度睡眠", (unsigned)kIdleSleepMs);
-                enter_deep_sleep();
-            }
-            continue;
-        }
-        idle_since = esp_timer_get_time();
-
+        // 不建 queue set：两个队列各自取，省掉一种能把显示任务弄死的失败路径。
+        // 刷新期间积压的事件在这里一次性取完，合并成一个净步数，只刷一次。
         int step = 0;
         bool force = false;
         bool factory = false;
-        bool sleep_now = false;
-        if (active == board_keys_queue()) {
-            board_key_event_t event = {};
-            if (xQueueReceive(board_keys_queue(), &event, 0) != pdTRUE) {
-                continue;
-            }
-            if (event.key == BOARD_KEY_PREV) {
-                step = -1;
-            } else if (event.key == BOARD_KEY_NEXT) {
-                step = 1;
-            } else {
-                force = true;  // KEY3 = 原地重刷
-            }
-        } else {
-            display_cmd cmd = display_cmd::refresh;
-            if (xQueueReceive(s_cmds, &cmd, 0) != pdTRUE) {
-                continue;
-            }
-            if (cmd == display_cmd::next) {
-                step = 1;
-            } else if (cmd == display_cmd::prev) {
-                step = -1;
-            } else if (cmd == display_cmd::factory) {
-                factory = true;
-            } else if (cmd == display_cmd::sleep) {
-                sleep_now = true;
-            } else {
-                force = true;
-            }
-        }
+        bool woke = false;
 
-        // 刷新期间积压的命令合并成一次动作。
         board_key_event_t key = {};
-        while (xQueueReceive(board_keys_queue(), &key, 0) == pdTRUE) {
+        while (keys != nullptr && xQueueReceive(keys, &key, 0) == pdTRUE) {
+            woke = true;
             if (key.key == BOARD_KEY_PREV) {
                 --step;
             } else if (key.key == BOARD_KEY_NEXT) {
                 ++step;
             } else {
-                force = true;
+                force = true;  // KEY3 = 原地重刷
             }
         }
-        display_cmd pending = display_cmd::refresh;
-        while (xQueueReceive(s_cmds, &pending, 0) == pdTRUE) {
-            if (pending == display_cmd::next) {
+
+        display_cmd cmd = display_cmd::refresh;
+        if (s_cmds == nullptr) {
+            vTaskDelay(pdMS_TO_TICKS(20));
+            continue;
+        }
+        while (xQueueReceive(s_cmds, &cmd, pdMS_TO_TICKS(20)) == pdTRUE) {
+            woke = true;
+            if (cmd == display_cmd::next) {
                 ++step;
-            } else if (pending == display_cmd::prev) {
+            } else if (cmd == display_cmd::prev) {
                 --step;
-            } else if (pending == display_cmd::factory) {
+            } else if (cmd == display_cmd::factory) {
                 factory = true;
-            } else if (pending == display_cmd::sleep) {
-                sleep_now = true;
             } else {
                 force = true;
             }
         }
 
-        // 显式的睡眠命令优先：不看充电器和 OTA 状态，是用户主动要求的。
-        if (sleep_now) {
-            ESP_LOGI(kTag, "收到睡眠命令");
-            enter_deep_sleep();
+        if (!woke) {
+            continue;
         }
+        s_idle_since_us = esp_timer_get_time();
 
         const int count = board_sd_frame_count();
+        s_frame_count = count;
+        s_display_state = display_state::busy;
+
         if (factory) {
             // 出厂画面固定来自 artifacts，不管卡上有没有帧文件。
             if (artifacts_draw_boot_frame() == ESP_OK) {
-                present_back("出厂画面");
+                s_last_result = present_back("出厂画面") ? "factory" : "factory-failed";
             } else {
                 ESP_LOGW(kTag, "artifacts 里没有出厂画面，改刷白屏");
                 epd_fb_clear(WHITE);
-                present_back("白屏");
+                s_last_result = present_back("白屏") ? "factory-white" : "factory-failed";
             }
         } else if (count > 0) {
             s_frame_index = ((s_frame_index + step) % count + count) % count;
-            if (!show_card_frame(s_frame_index, count)) {
+            const bool shown = show_card_frame(s_frame_index, count);
+            s_last_result = shown ? "ok" : "load-failed";
+            if (!shown) {
                 ESP_LOGE(kTag, "第 %d/%d 张载入或上屏失败", s_frame_index + 1, count);
                 led_event_post(LED_EV_ANOMALY, 0);
             }
         } else if (step != 0 && !force) {
             ESP_LOGW(kTag, "卡上没有可用图片，不翻页");
+            s_last_result = "no-image";
             led_event_post(LED_EV_NO_IMAGE, 0);
         } else {
             if (board_sd_mounted()) {
                 ESP_LOGI(kTag, "TF 卡上没有可用帧文件，改用 artifacts 里的画面");
             }
-            refresh_fallback();
+            s_last_result = refresh_fallback() ? "fallback" : "fallback-failed";
         }
+        s_display_state = display_state::idle;
     }
 }
 
 }  // namespace
+
+esp_err_t app_post_display(display_cmd cmd)
+{
+    if (s_cmds == nullptr) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    return xQueueSend(s_cmds, &cmd, 0) == pdTRUE ? ESP_OK : ESP_ERR_NO_MEM;
+}
+
+void app_request_sleep()
+{
+    s_sleep_requested = true;
+}
+
+void app_hold_awake()
+{
+    s_sleep_hold = true;
+}
+
+void app_describe(char *buf, size_t size)
+{
+    if (buf == nullptr || size == 0) {
+        return;
+    }
+    size_t used = 0;
+    buf[0] = '\0';
+
+    const char *wake = "cold";
+    if (s_wake.timer) {
+        wake = "timer";
+    } else if (s_wake.key) {
+        wake = s_wake.which == BOARD_KEY_PREV ? "key1"
+             : s_wake.which == BOARD_KEY_NEXT ? "key2" : "key3";
+    }
+
+    const int64_t idle_ms = (esp_timer_get_time() - s_idle_since_us) / 1000;
+    const bool usb = usb_serial_jtag_is_connected();
+    const char *sleep_state = s_sleep_hold ? "hold"
+                            : (s_plugged || usb) ? "off-powered"
+                            : (idle_ms < static_cast<int64_t>(kIdleSleepMs) ? "waiting" : "due");
+
+    append(buf, size, &used,
+           "wake=%s display=%s last=%s frames=%d idx=%d plugged=%d usb=%d idle=%lldms sleep=%s\n",
+           wake, display_state_name(), s_last_result, s_frame_count, s_frame_index,
+           s_plugged ? 1 : 0, usb ? 1 : 0, static_cast<long long>(idle_ms), sleep_state);
+
+    board_power_sample_t power = {};
+    if (deviceStatusPower(&power)) {
+        append(buf, size, &used, "battery=%dmV %u%% %s\n", power.millivolts,
+               static_cast<unsigned>(power.percent), charge_name(power.charge));
+    }
+    shtc3_sample_t env = {};
+    if (deviceStatusEnv(&env)) {
+        append(buf, size, &used, "env=%.1fC %.1f%%RH\n", env.temperature_c, env.humidity_percent);
+    }
+    append(buf, size, &used, "sd=%s\n", board_sd_mounted() ? "mounted" : "none");
+    append(buf, size, &used, "heap=%u/%u psram=%u\n",
+           static_cast<unsigned>(heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT)),
+           static_cast<unsigned>(heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT)),
+           static_cast<unsigned>(heap_caps_get_free_size(MALLOC_CAP_SPIRAM)));
+}
 
 extern "C" void app_main(void)
 {
@@ -485,10 +523,11 @@ extern "C" void app_main(void)
     framefolio::board_sleep::release_holds();
 
     board_gpio_init();
+    s_idle_since_us = esp_timer_get_time();
 
-    const framefolio::board_sleep::wake_info wake = framefolio::board_sleep::wakeup();
+    s_wake = framefolio::board_sleep::wakeup();
     bool refresh_on_start = false;
-    if (wake.timer) {
+    if (s_wake.timer) {
         // 定时唤醒只做两件事：看是不是插上了充电器；到点就补刷一张防残影。
         board_power_sample_t sample = {};
         const bool sampled = board_power_init() == ESP_OK && board_power_read(&sample) == ESP_OK;
@@ -544,7 +583,7 @@ extern "C" void app_main(void)
     const esp_err_t wifi = board_wifi_start_sta();
     if (wifi == ESP_OK) {
         ESP_ERROR_CHECK(otaServiceStart());
-        register_display_routes();
+        register_console_route();
     } else {
         ESP_LOGE(kTag, "Wi-Fi 未启动：%s，本次开机无法 OTA", esp_err_to_name(wifi));
     }
@@ -565,18 +604,18 @@ extern "C" void app_main(void)
              framefolio::board::kPeriphPowerEn, framefolio::board::kBatteryAdc, framefolio::board::kBatteryAdcCtl,
              framefolio::board::kPowerChgStat, framefolio::board::kPowerFullStat);
 
-    // 三条刷屏命令来源共用一条队列：按键、调试串口、HTTP。
+    // 刷屏命令共用一条队列：按键、串口控制台、HTTP 控制台。
     s_cmds = xQueueCreate(8, sizeof(display_cmd));
     if (s_cmds == nullptr) {
         ESP_LOGE(kTag, "命令队列创建失败");
     }
 
     // 唤醒的那一下按键本身就是一次操作，补投成命令，否则用户得按第二次才看得到画面。
-    if (wake.key) {
-        ESP_LOGI(kTag, "按键唤醒，按 KEY%d 处理", (int)wake.which + 1);
-        post_display_cmd(cmd_for_key(wake.which));
+    if (s_wake.key) {
+        ESP_LOGI(kTag, "按键唤醒，按 KEY%d 处理", (int)s_wake.which + 1);
+        app_post_display(cmd_for_key(s_wake.which));
     } else if (refresh_on_start) {
-        post_display_cmd(display_cmd::refresh);
+        app_post_display(display_cmd::refresh);
     }
 
     // 按键用下降沿中断，必须先于显示任务注册，否则第一次翻页会丢。
@@ -598,6 +637,11 @@ extern "C" void app_main(void)
 
     if (xTaskCreate(display_task, "display", 8192, nullptr, 5, nullptr) != pdPASS) {
         ESP_LOGE(kTag, "显示任务创建失败");
+    }
+
+    // 睡眠由独立任务看管：显示任务挂了也不能让设备一直醒着耗电。
+    if (xTaskCreate(power_guard_task, "power_guard", 3072, nullptr, 4, nullptr) != pdPASS) {
+        ESP_LOGE(kTag, "电源守护任务创建失败");
     }
 
     // 放在最后：未调用则新镜像 60 s 后被回滚。

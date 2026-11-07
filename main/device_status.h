@@ -21,6 +21,24 @@ void deviceStatusSetPower(const board_power_sample_t &sample);
 void deviceStatusSetEnv(const shtc3_sample_t &sample);
 
 /**
+ * @brief 取最近一次电池采样。
+ *
+ * @param[out] out 结果写入处。
+ * @return 采过样返回 true；从未采到有效值返回 false，此时 out 不变。
+ *
+ * @note 给控制台的 status 命令用：只读缓存，不触发采样。
+ */
+bool deviceStatusPower(board_power_sample_t *out);
+
+/**
+ * @brief 取最近一次温湿度采样。
+ *
+ * @param[out] out 结果写入处。
+ * @return 采过样返回 true；从未采到有效值返回 false，此时 out 不变。
+ */
+bool deviceStatusEnv(shtc3_sample_t *out);
+
+/**
  * @brief 写出一段运行状态 JSON 片段。
  *
  * @param[out] buf  输出缓冲。

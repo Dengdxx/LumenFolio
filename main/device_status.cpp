@@ -53,6 +53,37 @@ void deviceStatusSetEnv(const shtc3_sample_t &sample)
     taskEXIT_CRITICAL(&s_lock);
 }
 
+bool deviceStatusPower(board_power_sample_t *out)
+{
+    if (out == nullptr) {
+        return false;
+    }
+    taskENTER_CRITICAL(&s_lock);
+    const bool valid = s_state.battery_valid;
+    if (valid) {
+        out->millivolts = s_state.battery_mv;
+        out->percent    = s_state.battery_percent;
+        out->charge     = s_state.charge;
+    }
+    taskEXIT_CRITICAL(&s_lock);
+    return valid;
+}
+
+bool deviceStatusEnv(shtc3_sample_t *out)
+{
+    if (out == nullptr) {
+        return false;
+    }
+    taskENTER_CRITICAL(&s_lock);
+    const bool valid = s_state.env_valid;
+    if (valid) {
+        out->temperature_c    = s_state.temperature_c;
+        out->humidity_percent = s_state.humidity_percent;
+    }
+    taskEXIT_CRITICAL(&s_lock);
+    return valid;
+}
+
 int deviceStatusJson(char *buf, size_t size)
 {
     if (buf == nullptr || size == 0) {
