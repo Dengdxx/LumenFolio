@@ -124,7 +124,9 @@ esp_err_t board_wifi_start_sta()
 
     ESP_ERROR_CHECK(esp_netif_init());
     ESP_ERROR_CHECK(esp_event_loop_create_default());
-    esp_netif_create_default_wifi_sta();
+    auto *sta_netif = esp_netif_create_default_wifi_sta();
+    // 首次申请 DHCP 租约时就携带产品主机名。
+    ESP_ERROR_CHECK_WITHOUT_ABORT(esp_netif_set_hostname(sta_netif, "LumenFolio"));
 
     wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
     ESP_ERROR_CHECK(esp_wifi_init(&cfg));
