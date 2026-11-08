@@ -33,16 +33,6 @@ import (
 	"lumenfolio/panel"
 )
 
-// 界面用的颜色。墨水的预览色另见 inks，不从这里取。
-var (
-	bgColor     = color.NRGBA{24, 24, 27, 255}
-	panelColor  = color.NRGBA{38, 38, 43, 255}
-	textColor   = color.NRGBA{232, 232, 235, 255}
-	mutedColor  = color.NRGBA{150, 150, 158, 255}
-	accentColor = color.NRGBA{96, 165, 250, 255}
-	frameColor  = color.NRGBA{210, 210, 205, 255}
-)
-
 type viewMode int
 
 const (
@@ -99,6 +89,7 @@ type windowInvalidator interface {
 
 type ui struct {
 	theme       *material.Theme
+	colors      appColors
 	explorer    *explorer.Explorer
 	window      windowInvalidator
 	initialFile string
@@ -164,14 +155,16 @@ type ditherResult struct {
 func newUI(shaper *text.Shaper, initialFile string) *ui {
 	theme := material.NewTheme()
 	theme.Shaper = shaper
+	colors := phoneColors(systemPrefersDark())
 	theme.Palette = material.Palette{
-		Bg:         panelColor,
-		Fg:         textColor,
-		ContrastBg: accentColor,
-		ContrastFg: color.NRGBA{15, 15, 18, 255},
+		Bg:         colors.surface,
+		Fg:         colors.text,
+		ContrastBg: colors.primary,
+		ContrastFg: colors.onPrimary,
 	}
 	ui := &ui{
 		theme:       theme,
+		colors:      colors,
 		initialFile: initialFile,
 		algButtons:  make([]widget.Clickable, len(panel.Algorithms())),
 		algList:     layout.List{Axis: layout.Vertical},
@@ -323,7 +316,7 @@ func (u *ui) triggerDither() {
 }
 
 func (u *ui) layout(gtx layout.Context) layout.Dimensions {
-	paint.Fill(gtx.Ops, bgColor)
+	paint.Fill(gtx.Ops, u.colors.background)
 	select {
 	case result := <-u.gallery.results:
 		u.gallery.applyResult(result)
@@ -344,8 +337,7 @@ func (u *ui) layout(gtx layout.Context) layout.Dimensions {
 func (u *ui) sidebar(gtx layout.Context) layout.Dimensions {
 	gtx.Constraints.Min = image.Point{}
 	gtx.Constraints.Max.X = gtx.Dp(unit.Dp(248))
-	fill(gtx, panelColor)
-	return layout.UniformInset(unit.Dp(16)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+	controls := func(gtx layout.Context) layout.Dimensions {
 		return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
 			layout.Rigid(u.heading),
 			layout.Rigid(gap(12)),
@@ -361,7 +353,7 @@ func (u *ui) sidebar(gtx layout.Context) layout.Dimensions {
 			layout.Rigid(gap(6)),
 			layout.Rigid(u.swatches),
 			layout.Rigid(gap(14)),
-			layout.Rigid(u.section("相框地址")),
+			layout.Rigid(u.section("相框 IP 或主机名")),
 			layout.Rigid(gap(6)),
 			layout.Rigid(u.hostField),
 			layout.Rigid(gap(8)),
@@ -369,25 +361,39 @@ func (u *ui) sidebar(gtx layout.Context) layout.Dimensions {
 			layout.Rigid(gap(8)),
 			layout.Rigid(u.button("固件升级", &u.ota.openButton, u.openOTA)),
 			layout.Rigid(gap(8)),
-			layout.Rigid(u.button("上传到相框", &u.uploadButton, u.onUpload)),
+			layout.Rigid(u.primaryButton("上传到相框", &u.uploadButton, u.onUpload)),
 			layout.Rigid(gap(8)),
 			layout.Rigid(u.button("导出帧文件", &u.exportButton, u.onExport)),
 		)
+	}
+	return layout.UniformInset(8).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+		return u.card(gtx, func(gtx layout.Context) layout.Dimensions {
+			return layout.UniformInset(8).Layout(gtx, controls)
+		})
 	})
 }
 
 func (u *ui) heading(gtx layout.Context) layout.Dimensions {
-	return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+	return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			label := material.H6(u.theme, "相框预览")
-			label.Color = textColor
-			return label.Layout(gtx)
+			size := image.Pt(gtx.Dp(26), gtx.Dp(26))
+			tint := u.colors.primary
+			tint.A = 38
+			roundedSurface(gtx, size, 8, tint, color.NRGBA{})
+			gtx.Constraints = layout.Exact(size)
+			return layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+				frame := image.Pt(gtx.Dp(11), gtx.Dp(14))
+				strokeRounded(gtx, frame, 2, u.colors.primary)
+				return layout.Dimensions{Size: frame}
+			})
 		}),
-		layout.Rigid(gap(2)),
+		layout.Rigid(gap(10)),
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			label := material.Body2(u.theme, "1200×1600 · 六色")
-			label.Color = mutedColor
-			return label.Layout(gtx)
+			return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+				layout.Rigid(material.H6(u.theme, "LumenFolio").Layout),
+				layout.Rigid(gap(2)),
+				layout.Rigid(u.section("1200×1600 · 六色")),
+			)
 		}),
 	)
 }
@@ -407,9 +413,8 @@ func (u *ui) cropControls(gtx layout.Context) layout.Dimensions {
 						u.triggerDither()
 					}
 					b := material.Button(u.theme, &u.rotLeftBtn, "↺ -90°")
-					b.CornerRadius = unit.Dp(4)
 					b.Inset = layout.Inset{Top: unit.Dp(6), Bottom: unit.Dp(6)}
-					return b.Layout(gtx)
+					return u.styledButton(gtx, b, false)
 				}),
 				layout.Rigid(gap(6)),
 				layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
@@ -418,9 +423,8 @@ func (u *ui) cropControls(gtx layout.Context) layout.Dimensions {
 						u.triggerDither()
 					}
 					b := material.Button(u.theme, &u.rotRightBtn, "↻ +90°")
-					b.CornerRadius = unit.Dp(4)
 					b.Inset = layout.Inset{Top: unit.Dp(6), Bottom: unit.Dp(6)}
-					return b.Layout(gtx)
+					return u.styledButton(gtx, b, false)
 				}),
 				layout.Rigid(gap(6)),
 				layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
@@ -429,9 +433,8 @@ func (u *ui) cropControls(gtx layout.Context) layout.Dimensions {
 						u.triggerDither()
 					}
 					b := material.Button(u.theme, &u.resetCropBtn, "复位")
-					b.CornerRadius = unit.Dp(4)
 					b.Inset = layout.Inset{Top: unit.Dp(6), Bottom: unit.Dp(6)}
-					return b.Layout(gtx)
+					return u.styledButton(gtx, b, false)
 				}),
 			)
 		}),
@@ -442,12 +445,20 @@ func (u *ui) cropControls(gtx layout.Context) layout.Dimensions {
 func (u *ui) section(title string) layout.Widget {
 	return func(gtx layout.Context) layout.Dimensions {
 		label := material.Body2(u.theme, title)
-		label.Color = mutedColor
+		label.Color = u.colors.muted
 		return label.Layout(gtx)
 	}
 }
 
 func (u *ui) button(label string, clickable *widget.Clickable, action func()) layout.Widget {
+	return u.commandButton(label, clickable, action, false)
+}
+
+func (u *ui) primaryButton(label string, clickable *widget.Clickable, action func()) layout.Widget {
+	return u.commandButton(label, clickable, action, true)
+}
+
+func (u *ui) commandButton(label string, clickable *widget.Clickable, action func(), primary bool) layout.Widget {
 	return func(gtx layout.Context) layout.Dimensions {
 		// 忙碌时仍向 Gio 注册点击过滤器，避免恢复后的第一下鼠标点击丢失。
 		if clickable.Clicked(gtx) && !u.fileBusy {
@@ -458,10 +469,30 @@ func (u *ui) button(label string, clickable *widget.Clickable, action func()) la
 		}
 		gtx.Constraints.Min.X = gtx.Constraints.Max.X
 		button := material.Button(u.theme, clickable, label)
-		button.CornerRadius = unit.Dp(6)
 		button.Inset = layout.Inset{Top: unit.Dp(8), Bottom: unit.Dp(8), Left: unit.Dp(10), Right: unit.Dp(10)}
-		return button.Layout(gtx)
+		return u.styledButton(gtx, button, primary)
 	}
+}
+
+func (u *ui) styledButton(gtx layout.Context, button material.ButtonStyle, primary bool) layout.Dimensions {
+	button.CornerRadius = 8
+	if !primary {
+		button.Background = u.colors.surface
+		button.Color = u.colors.onSelected
+	}
+	border := u.colors.outline
+	if !gtx.Enabled() {
+		button.Background = u.colors.surface
+		button.Color = u.colors.muted
+		border = u.colors.divider
+	} else if gtx.Focused(button.Button) {
+		border = u.colors.primary
+	} else if primary {
+		border = color.NRGBA{}
+	}
+	dims := button.Layout(gtx)
+	strokeRounded(gtx, dims.Size, button.CornerRadius, border)
+	return dims
 }
 
 func (u *ui) algorithmList(gtx layout.Context) layout.Dimensions {
@@ -490,41 +521,39 @@ func (u *ui) algorithm(index int, name string) layout.Widget {
 	}
 }
 
-// choice 是一个可选中的条目。宽度撑满侧边栏，选中时左侧加一条强调色。
+// choice 在列表内撑满宽度，并沿用手机端选中色。
 func (u *ui) choice(gtx layout.Context, clickable *widget.Clickable, label string, selected bool) layout.Dimensions {
 	gtx.Constraints.Min.X = gtx.Constraints.Max.X
 	return clickable.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-		bg := panelColor
+		bg, fg := u.colors.surface, u.colors.text
 		switch {
 		case selected:
-			bg = color.NRGBA{52, 64, 84, 255}
+			bg, fg = u.colors.selected, u.colors.onSelected
 		case clickable.Hovered():
-			bg = color.NRGBA{48, 48, 54, 255}
+			bg = u.colors.field
 		}
 		macro := op.Record(gtx.Ops)
 		dims := layout.Inset{Top: unit.Dp(7), Bottom: unit.Dp(7), Left: unit.Dp(12), Right: unit.Dp(12)}.Layout(gtx,
 			func(gtx layout.Context) layout.Dimensions {
 				l := material.Body1(u.theme, label)
-				l.Color = textColor
+				l.Color = fg
 				return l.Layout(gtx)
 			})
 		call := macro.Stop()
 
 		size := image.Point{X: gtx.Constraints.Max.X, Y: dims.Size.Y}
-		rect := clip.RRect{Rect: image.Rectangle{Max: size}, SE: 6, SW: 6, NW: 6, NE: 6}
-		paint.FillShape(gtx.Ops, bg, rect.Op(gtx.Ops))
-		if selected {
-			bar := clip.Rect{Max: image.Point{X: gtx.Dp(unit.Dp(3)), Y: size.Y}}.Push(gtx.Ops)
-			paint.ColorOp{Color: accentColor}.Add(gtx.Ops)
-			paint.PaintOp{}.Add(gtx.Ops)
-			bar.Pop()
+		border := color.NRGBA{}
+		if gtx.Focused(clickable) {
+			border = u.colors.primary
 		}
+		roundedSurface(gtx, size, 8, bg, border)
 		call.Add(gtx.Ops)
 		return layout.Dimensions{Size: size}
 	})
 }
 
 func (u *ui) swatches(gtx layout.Context) layout.Dimensions {
+	gtx.Constraints.Min.X = gtx.Constraints.Max.X
 	return layout.Flex{Axis: layout.Horizontal, Spacing: layout.SpaceBetween}.Layout(gtx,
 		layout.Rigid(u.swatch(panel.Inks()[0])),
 		layout.Rigid(u.swatch(panel.Inks()[1])),
@@ -537,19 +566,18 @@ func (u *ui) swatches(gtx layout.Context) layout.Dimensions {
 
 func (u *ui) swatch(ink panel.Ink) layout.Widget {
 	return func(gtx layout.Context) layout.Dimensions {
-		size := gtx.Dp(unit.Dp(26))
-		return layout.Flex{Axis: layout.Vertical, Alignment: layout.Middle}.Layout(gtx,
+		size := gtx.Dp(unit.Dp(14))
+		return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
 			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 				gtx.Constraints.Min = image.Point{X: size, Y: size}
 				gtx.Constraints.Max = gtx.Constraints.Min
-				rect := clip.RRect{Rect: image.Rectangle{Max: gtx.Constraints.Min}, SE: 4, SW: 4, NW: 4, NE: 4}
-				paint.FillShape(gtx.Ops, ink.Preview, rect.Op(gtx.Ops))
+				roundedSurface(gtx, gtx.Constraints.Min, 7, ink.Preview, u.colors.outline)
 				return layout.Dimensions{Size: gtx.Constraints.Min}
 			}),
-			layout.Rigid(gap(3)),
+			layout.Rigid(gap(4)),
 			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 				label := material.Caption(u.theme, ink.Name)
-				label.Color = mutedColor
+				label.Color = u.colors.muted
 				return label.Layout(gtx)
 			}),
 		)
@@ -559,11 +587,19 @@ func (u *ui) swatch(ink panel.Ink) layout.Widget {
 func (u *ui) canvas(gtx layout.Context) layout.Dimensions {
 	// 指针区域必须落在真正的画布上。Flex 子项在父级原点展开，
 	// 若在 canvas 上注册，会从窗口左上角盖住侧栏按钮。
-	return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
-		layout.Rigid(u.canvasHeader),
-		layout.Flexed(1, u.canvasBody),
-		layout.Rigid(u.statusBar),
-	)
+	return layout.Inset{Top: 8, Right: 8, Bottom: 8}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+		return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions { return u.card(gtx, u.canvasHeader) }),
+			layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+				return layout.Inset{Top: 8, Bottom: 8}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+					bounds := image.Rectangle{Max: gtx.Constraints.Max}
+					defer clip.UniformRRect(bounds, gtx.Dp(12)).Push(gtx.Ops).Pop()
+					return u.card(gtx, u.canvasBody)
+				})
+			}),
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions { return u.card(gtx, u.statusBar) }),
+		)
+	})
 }
 
 // canvasHeader 显示取景/预览模式切换与快捷操作。
@@ -571,15 +607,14 @@ func (u *ui) canvasHeader(gtx layout.Context) layout.Dimensions {
 	if u.rawImage == nil {
 		return layout.Dimensions{}
 	}
-	fill(gtx, panelColor)
 	return layout.Inset{Top: unit.Dp(6), Bottom: unit.Dp(6), Left: unit.Dp(16), Right: unit.Dp(16)}.Layout(gtx,
 		func(gtx layout.Context) layout.Dimensions {
 			return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
-				layout.Rigid(u.tabButton(" ✂️ 取景选取 ", &u.modeCropBtn, u.mode == modeCrop, func() {
+				layout.Rigid(u.tabButton("取景选取", &u.modeCropBtn, u.mode == modeCrop, func() {
 					u.mode = modeCrop
 				})),
 				layout.Rigid(gap(6)),
-				layout.Rigid(u.tabButton(" 🖼️ 六色预览 ", &u.modePrevBtn, u.mode == modePreview, func() {
+				layout.Rigid(u.tabButton("六色预览", &u.modePrevBtn, u.mode == modePreview, func() {
 					u.mode = modePreview
 					if u.preview == nil && !u.rendering {
 						u.triggerDither()
@@ -587,12 +622,12 @@ func (u *ui) canvasHeader(gtx layout.Context) layout.Dimensions {
 				})),
 				layout.Rigid(gap(16)),
 				layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-					hint := "🖱️ 鼠标左键平移 · 滚轮缩放 · 顶部把手或右键旋转"
+					hint := "鼠标左键平移 · 滚轮缩放 · 顶部把手或右键旋转"
 					if u.mode == modePreview {
 						hint = "当前显示 1200×1600 面板的六色墨水效果"
 					}
 					lbl := material.Body2(u.theme, hint)
-					lbl.Color = mutedColor
+					lbl.Color = u.colors.muted
 					return lbl.Layout(gtx)
 				}),
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
@@ -604,17 +639,15 @@ func (u *ui) canvasHeader(gtx layout.Context) layout.Dimensions {
 							}
 						}
 						btn := material.Button(u.theme, &u.toPreviewBtn, "查看效果 →")
-						btn.CornerRadius = unit.Dp(4)
 						btn.Inset = layout.Inset{Top: unit.Dp(5), Bottom: unit.Dp(5), Left: unit.Dp(10), Right: unit.Dp(10)}
-						return btn.Layout(gtx)
+						return u.styledButton(gtx, btn, false)
 					}
 					if u.toCropBtn.Clicked(gtx) {
 						u.mode = modeCrop
 					}
 					btn := material.Button(u.theme, &u.toCropBtn, "← 调整取景")
-					btn.CornerRadius = unit.Dp(4)
 					btn.Inset = layout.Inset{Top: unit.Dp(5), Bottom: unit.Dp(5), Left: unit.Dp(10), Right: unit.Dp(10)}
-					return btn.Layout(gtx)
+					return u.styledButton(gtx, btn, false)
 				}),
 			)
 		})
@@ -628,14 +661,17 @@ func (u *ui) tabButton(label string, clickable *widget.Clickable, active bool, a
 			gtx.Execute(op.InvalidateCmd{})
 		}
 		return clickable.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-			bg := color.NRGBA{48, 48, 54, 255}
-			fg := mutedColor
+			bg, fg, border := u.colors.surface, u.colors.muted, u.colors.outline
 			if active {
-				bg = color.NRGBA{52, 64, 84, 255}
-				fg = textColor
+				bg, fg, border = u.colors.selected, u.colors.onSelected, color.NRGBA{}
+			} else if clickable.Hovered() {
+				bg = u.colors.field
+			}
+			if gtx.Focused(clickable) {
+				border = u.colors.primary
 			}
 			macro := op.Record(gtx.Ops)
-			dims := layout.Inset{Top: unit.Dp(5), Bottom: unit.Dp(5), Left: unit.Dp(10), Right: unit.Dp(10)}.Layout(gtx,
+			dims := layout.Inset{Top: 6, Bottom: 6, Left: 12, Right: 12}.Layout(gtx,
 				func(gtx layout.Context) layout.Dimensions {
 					l := material.Body2(u.theme, label)
 					l.Color = fg
@@ -643,14 +679,7 @@ func (u *ui) tabButton(label string, clickable *widget.Clickable, active bool, a
 				})
 			call := macro.Stop()
 
-			rect := clip.RRect{Rect: image.Rectangle{Max: dims.Size}, SE: 4, SW: 4, NW: 4, NE: 4}
-			paint.FillShape(gtx.Ops, bg, rect.Op(gtx.Ops))
-			if active {
-				line := clip.Rect{Min: image.Pt(0, dims.Size.Y-gtx.Dp(unit.Dp(2))), Max: dims.Size}.Push(gtx.Ops)
-				paint.ColorOp{Color: accentColor}.Add(gtx.Ops)
-				paint.PaintOp{}.Add(gtx.Ops)
-				line.Pop()
-			}
+			roundedSurface(gtx, dims.Size, 8, bg, border)
 			call.Add(gtx.Ops)
 			return dims
 		})
@@ -662,7 +691,7 @@ func (u *ui) canvasBody(gtx layout.Context) layout.Dimensions {
 		if u.rawImage == nil {
 			message := "还没有图片，点击左侧「打开图片」"
 			label := material.H6(u.theme, message)
-			label.Color = mutedColor
+			label.Color = u.colors.muted
 			label.Alignment = text.Middle
 			return layout.Center.Layout(gtx, label.Layout)
 		}
@@ -692,9 +721,10 @@ func (u *ui) cropView(gtx layout.Context) layout.Dimensions {
 	sScreen := float64(frameRect.Dx()) / float64(panel.Width)
 	fc := image.Pt(frameRect.Min.X+frameRect.Dx()/2, frameRect.Min.Y+frameRect.Dy()/2)
 
-	// 顶部固定旋转把手位置（在固定取景框顶部上方 24dp）
+	// 把手位于取景框上方，靠近视口顶部时给圆形按钮留出空间。
 	topCenter := f32.Pt(float32(fc.X), float32(frameRect.Min.Y))
 	handlePos := topCenter.Sub(f32.Pt(0, float32(gtx.Dp(unit.Dp(24)))))
+	handlePos.Y = max(handlePos.Y, float32(gtx.Dp(10)))
 
 	// 2. 指针区域由 canvasArea 限定在画布内，这里只消费事件。
 	filter := pointer.Filter{
@@ -821,8 +851,8 @@ func (u *ui) cropView(gtx layout.Context) layout.Dimensions {
 	cornerBracket := func(ox, oy, dx, dy float32) {
 		l := float32(gtx.Dp(unit.Dp(12)))
 		w := float32(gtx.Dp(unit.Dp(2.5)))
-		drawLine(f32.Pt(ox, oy), f32.Pt(ox+dx*l, oy), accentColor, w)
-		drawLine(f32.Pt(ox, oy), f32.Pt(ox, oy+dy*l), accentColor, w)
+		drawLine(f32.Pt(ox, oy), f32.Pt(ox+dx*l, oy), u.colors.primary, w)
+		drawLine(f32.Pt(ox, oy), f32.Pt(ox, oy+dy*l), u.colors.primary, w)
 	}
 	cornerBracket(float32(frameRect.Min.X), float32(frameRect.Min.Y), 1, 1)
 	cornerBracket(float32(frameRect.Max.X), float32(frameRect.Min.Y), -1, 1)
@@ -830,10 +860,10 @@ func (u *ui) cropView(gtx layout.Context) layout.Dimensions {
 	cornerBracket(float32(frameRect.Min.X), float32(frameRect.Max.Y), 1, -1)
 
 	// 9. 绘制顶部固定旋转把手与连线
-	drawLine(topCenter, handlePos, accentColor, float32(gtx.Dp(unit.Dp(1.5))))
+	drawLine(topCenter, handlePos, u.colors.primary, float32(gtx.Dp(unit.Dp(1.5))))
 	hr := gtx.Dp(unit.Dp(7))
 	hrect := image.Rect(int(handlePos.X)-hr, int(handlePos.Y)-hr, int(handlePos.X)+hr, int(handlePos.Y)+hr)
-	paint.FillShape(gtx.Ops, accentColor, clip.Ellipse(hrect).Op(gtx.Ops))
+	paint.FillShape(gtx.Ops, u.colors.primary, clip.Ellipse(hrect).Op(gtx.Ops))
 	ir := gtx.Dp(unit.Dp(2))
 	irect := image.Rect(int(handlePos.X)-ir, int(handlePos.Y)-ir, int(handlePos.X)+ir, int(handlePos.Y)+ir)
 	paint.FillShape(gtx.Ops, color.NRGBA{255, 255, 255, 255}, clip.Ellipse(irect).Op(gtx.Ops))
@@ -874,7 +904,7 @@ func (u *ui) picture(gtx layout.Context) layout.Dimensions {
 				message = "正在采样并计算抖动…"
 			}
 			label := material.H6(u.theme, message)
-			label.Color = mutedColor
+			label.Color = u.colors.muted
 			label.Alignment = text.Middle
 			return layout.Center.Layout(gtx, label.Layout)
 		}
@@ -894,19 +924,18 @@ func framePicture(gtx layout.Context, imageOp paint.ImageOp) layout.Dimensions {
 	imageOp.Filter = paint.FilterNearest
 	return layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 		gtx.Constraints = layout.Exact(image.Pt(width, height))
-		fill(gtx, frameColor)
+		fill(gtx, color.NRGBA{210, 210, 205, 255})
 		return widget.Image{Src: imageOp, Fit: widget.Contain, Position: layout.Center}.Layout(gtx)
 	})
 }
 
 func (u *ui) statusBar(gtx layout.Context) layout.Dimensions {
-	fill(gtx, panelColor)
 	return layout.Inset{Top: unit.Dp(8), Bottom: unit.Dp(8), Left: unit.Dp(16), Right: unit.Dp(16)}.Layout(gtx,
 		func(gtx layout.Context) layout.Dimensions {
 			return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
 				layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
 					label := material.Body2(u.theme, u.status)
-					label.Color = mutedColor
+					label.Color = u.colors.muted
 					return label.Layout(gtx)
 				}),
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
@@ -916,7 +945,7 @@ func (u *ui) statusBar(gtx layout.Context) layout.Dimensions {
 					b := u.rawImage.Bounds()
 					info := fmt.Sprintf("原图: %d×%d", b.Dx(), b.Dy())
 					label := material.Caption(u.theme, info)
-					label.Color = mutedColor
+					label.Color = u.colors.muted
 					return label.Layout(gtx)
 				}),
 			)
@@ -972,10 +1001,22 @@ func (u *ui) readImage(file io.ReadCloser) openResult {
 func (u *ui) hostField(gtx layout.Context) layout.Dimensions {
 	gtx.Constraints.Min.X = gtx.Constraints.Max.X
 	editor := material.Editor(u.theme, &u.hostEditor, "192.168.137.42")
-	editor.Color = textColor
-	editor.HintColor = mutedColor
+	editor.Color = u.colors.text
+	editor.HintColor = u.colors.muted
 	editor.TextSize = unit.Sp(14)
-	return editor.Layout(gtx)
+	return layout.Background{}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+		size := gtx.Constraints.Min
+		border := u.colors.outline
+		if !gtx.Enabled() {
+			border = u.colors.divider
+		} else if gtx.Focused(&u.hostEditor) {
+			border = u.colors.primary
+		}
+		roundedSurface(gtx, size, 8, u.colors.field, border)
+		return layout.Dimensions{Size: size}
+	}, func(gtx layout.Context) layout.Dimensions {
+		return layout.Inset{Top: 6, Bottom: 6, Left: 8, Right: 8}.Layout(gtx, editor.Layout)
+	})
 }
 
 func (u *ui) postJob(text string) {

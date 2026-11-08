@@ -35,6 +35,8 @@ LumenFolio 桌面端在 Windows 上以一个 exe 提供图形界面和命令行�
 
 需要 Windows 上的微软雅黑（`C:\Windows\Fonts\msyh.ttc`）。找不到时仍能打开，但中文会变成方框。
 
+界面启动时读取 Windows 的应用颜色设置。浅色主题采用暖白和陶土色，深色主题采用炭黑和蓝色，取景、图库和固件升级与 Android 版沿用同一套配色与控件样式。
+
 源码变化后先编译一次，之后直接跑生成的 exe：
 
 ```powershell

@@ -133,7 +133,9 @@ func (g *galleryBrowser) applyResult(result galleryResult) {
 
 func (u *ui) galleryLayout(gtx layout.Context) layout.Dimensions {
 	return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
-		layout.Rigid(u.galleryHeader),
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			return u.card(gtx, u.galleryHeader)
+		}),
 		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
 			return layout.Flex{Axis: layout.Horizontal}.Layout(gtx,
 				layout.Rigid(u.galleryList),
@@ -145,11 +147,12 @@ func (u *ui) galleryLayout(gtx layout.Context) layout.Dimensions {
 
 func (u *ui) galleryHeader(gtx layout.Context) layout.Dimensions {
 	g := &u.gallery
+	title := material.Subtitle1(u.theme, "相框图片 · "+g.host)
 	return layout.UniformInset(unit.Dp(12)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 		return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
 			layout.Rigid(u.tabButton("← 返回", &g.closeButton, false, u.closeGallery)),
 			layout.Rigid(gap(12)),
-			layout.Flexed(1, u.section("相框图片 · "+g.host)),
+			layout.Flexed(1, title.Layout),
 			layout.Rigid(u.tabButton("Flash artifacts", &g.flashButton, g.source == gallery.Flash, func() {
 				if g.source != gallery.Flash {
 					u.loadGallery(gallery.Flash)
@@ -170,15 +173,16 @@ func (u *ui) galleryHeader(gtx layout.Context) layout.Dimensions {
 func (u *ui) galleryList(gtx layout.Context) layout.Dimensions {
 	g := &u.gallery
 	gtx.Constraints.Max.X = gtx.Dp(unit.Dp(248))
-	gtx.Constraints.Min.X = gtx.Constraints.Max.X
-	fill(gtx, panelColor)
-	return layout.UniformInset(unit.Dp(12)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-		return g.list.Layout(gtx, len(g.pictures), func(gtx layout.Context, index int) layout.Dimensions {
-			entry, button := g.pictures[index], &g.buttons[index]
-			if button.Clicked(gtx) && (g.selected != entry.ID || g.err != nil) {
-				u.loadGalleryPreview(entry.ID)
-			}
-			return u.choice(gtx, button, entry.Name, g.selected == entry.ID)
+	gtx.Constraints.Min = gtx.Constraints.Max
+	return u.card(gtx, func(gtx layout.Context) layout.Dimensions {
+		return layout.UniformInset(unit.Dp(12)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+			return g.list.Layout(gtx, len(g.pictures), func(gtx layout.Context, index int) layout.Dimensions {
+				entry, button := g.pictures[index], &g.buttons[index]
+				if button.Clicked(gtx) && (g.selected != entry.ID || g.err != nil) {
+					u.loadGalleryPreview(entry.ID)
+				}
+				return u.choice(gtx, button, entry.Name, g.selected == entry.ID)
+			})
 		})
 	})
 }
@@ -201,7 +205,10 @@ func (u *ui) galleryPreview(gtx layout.Context) layout.Dimensions {
 			message = "此来源暂无可预览图片"
 		}
 		label := material.Body1(u.theme, message)
-		label.Color = mutedColor
+		label.Color = u.colors.muted
+		if g.err != nil {
+			label.Color = u.colors.error
+		}
 		label.Alignment = text.Middle
 		return layout.Center.Layout(gtx, label.Layout)
 	})

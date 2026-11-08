@@ -97,7 +97,7 @@ func TestCanvasHeaderTabsSwitchMode(t *testing.T) {
 	for _, click := range []struct {
 		at   f32.Point
 		want viewMode
-	}{{f32.Pt(420, 20), modePreview}, {f32.Pt(300, 20), modeCrop}} {
+	}{{f32.Pt(380, 28), modePreview}, {f32.Pt(300, 28), modeCrop}} {
 		r.Queue(
 			pointer.Event{Kind: pointer.Press, Source: pointer.Mouse, Buttons: pointer.ButtonPrimary, Position: click.at},
 			pointer.Event{Kind: pointer.Release, Source: pointer.Mouse, Position: click.at},

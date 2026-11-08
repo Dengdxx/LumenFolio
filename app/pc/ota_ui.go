@@ -144,49 +144,53 @@ func (u *ui) otaLayout(gtx layout.Context) layout.Dimensions {
 	p := &u.ota
 	return layout.N.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 		gtx.Constraints.Max.X = min(gtx.Constraints.Max.X, gtx.Dp(unit.Dp(560)))
-		return layout.UniformInset(unit.Dp(24)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-			return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
-				layout.Rigid(material.H6(u.theme, "固件升级").Layout),
-				layout.Rigid(gap(16)),
-				layout.Rigid(u.section("相框地址")),
-				layout.Rigid(gap(6)),
-				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					if u.fileBusy {
-						gtx = gtx.Disabled()
-					}
-					return u.hostField(gtx)
-				}),
-				layout.Rigid(gap(12)),
-				layout.Rigid(u.button("选择固件文件（.bin）", &p.chooseButton, u.chooseOTAFirmware)),
-				layout.Rigid(gap(12)),
-				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					if p.firmware.name == "" {
-						return layout.Dimensions{}
-					}
-					return u.section(p.firmware.name + " · 版本 " + p.firmware.version)(gtx)
-				}),
-				layout.Rigid(gap(8)),
-				layout.Rigid(u.section("升级期间请保持应用开启、连接和供电，暂勿操作相框按键或刷新屏幕。")),
-				layout.Rigid(gap(12)),
-				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					if p.firmware.data == nil {
-						return layout.Dimensions{}
-					}
-					return u.button("确认升级", &p.confirmButton, u.startOTA)(gtx)
-				}),
-				layout.Rigid(gap(12)),
-				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					return u.section(p.progress.Message)(gtx)
-				}),
-				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					if p.progress.Total == 0 {
-						return layout.Dimensions{}
-					}
-					return material.ProgressBar(u.theme, float32(p.progress.Sent)/float32(p.progress.Total)).Layout(gtx)
-				}),
-				layout.Rigid(gap(16)),
-				layout.Rigid(u.button("← 返回取景", &p.backButton, u.closeOTA)),
-			)
+		return u.card(gtx, func(gtx layout.Context) layout.Dimensions {
+			return layout.UniformInset(unit.Dp(24)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+				return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+					layout.Rigid(material.Subtitle1(u.theme, "固件升级").Layout),
+					layout.Rigid(gap(16)),
+					layout.Rigid(u.section("相框地址")),
+					layout.Rigid(gap(6)),
+					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+						if u.fileBusy {
+							gtx = gtx.Disabled()
+						}
+						return u.hostField(gtx)
+					}),
+					layout.Rigid(gap(12)),
+					layout.Rigid(u.button("选择固件文件（.bin）", &p.chooseButton, u.chooseOTAFirmware)),
+					layout.Rigid(gap(12)),
+					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+						if p.firmware.name == "" {
+							return layout.Dimensions{}
+						}
+						return material.Body2(u.theme, p.firmware.name+" · 版本 "+p.firmware.version).Layout(gtx)
+					}),
+					layout.Rigid(gap(8)),
+					layout.Rigid(u.section("升级期间请保持应用开启、连接和供电，暂勿操作相框按键或刷新屏幕。")),
+					layout.Rigid(gap(12)),
+					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+						if p.firmware.data == nil {
+							return layout.Dimensions{}
+						}
+						return u.primaryButton("确认升级", &p.confirmButton, u.startOTA)(gtx)
+					}),
+					layout.Rigid(gap(12)),
+					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+						return u.section(p.progress.Message)(gtx)
+					}),
+					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+						if p.progress.Total == 0 {
+							return layout.Dimensions{}
+						}
+						progress := material.ProgressBar(u.theme, float32(p.progress.Sent)/float32(p.progress.Total))
+						progress.TrackColor = u.colors.selected
+						return progress.Layout(gtx)
+					}),
+					layout.Rigid(gap(16)),
+					layout.Rigid(u.button("← 返回取景", &p.backButton, u.closeOTA)),
+				)
+			})
 		})
 	})
 }
