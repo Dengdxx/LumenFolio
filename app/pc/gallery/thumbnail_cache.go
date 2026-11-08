@@ -62,3 +62,15 @@ func ThumbnailFor(ctx context.Context, host string, port int, source Source, pic
 	}
 	return img, nil
 }
+
+// forgetThumbnail 丢弃已删除条目的所有已缓存版本。
+func forgetThumbnail(host string, port int, source Source, id string) {
+	thumbs.Lock()
+	defer thumbs.Unlock()
+	for key, item := range thumbs.items {
+		if key.host == host && key.port == port && key.source == source && key.id == id {
+			thumbs.order.Remove(item)
+			delete(thumbs.items, key)
+		}
+	}
+}

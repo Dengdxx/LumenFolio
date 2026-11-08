@@ -256,7 +256,11 @@ func (u *ui) applyPendingResults() (changed bool) {
 			u.status = text
 			changed = true
 		case result := <-u.gallery.results:
-			u.gallery.applyResult(result)
+			if u.gallery.applyResult(result) {
+				u.loadGallery(u.gallery.source)
+				u.loadGalleryInfo()
+				u.gallery.actionStatus = "已删除图片"
+			}
 			changed = true
 		case update := <-u.ota.updates:
 			u.ota.progress = update.progress

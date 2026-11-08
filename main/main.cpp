@@ -184,24 +184,24 @@ struct display_request {
 };
 
 /** @brief 只刷指定来源，读取失败时保留屏幕现有画面。 */
-bool show_picked_frame(const display_request &request)
+esp_err_t show_picked_frame(const display_request &request)
 {
-    if (request.cmd == display_cmd::pick_boot) {
-        return artifacts_draw_boot_frame() == ESP_OK && present_back("开机画面");
-    }
-    if (request.cmd == display_cmd::pick_inbox) {
-        return artifacts_draw_inbox_frame() == ESP_OK && present_back("上传画面");
+    if (request.cmd != display_cmd::pick_sd) {
+        const bool inbox = request.cmd == display_cmd::pick_inbox;
+        const esp_err_t err = inbox ? artifacts_draw_inbox_frame() : artifacts_draw_boot_frame();
+        if (err != ESP_OK) return err;
+        return present_back(inbox ? "上传画面" : "开机画面") ? ESP_OK : ESP_FAIL;
     }
     char path[sizeof(BOARD_SD_MOUNT_POINT) + BOARD_SD_FRAME_NAME_BYTES];
     snprintf(path, sizeof(path), "%s/%s", BOARD_SD_MOUNT_POINT, request.sd_name);
-    if (board_sd_load_frame(path) != ESP_OK || !present_back(path)) {
-        return false;
-    }
+    const esp_err_t err = board_sd_load_frame(path);
+    if (err != ESP_OK) return err;
+    if (!present_back(path)) return ESP_FAIL;
     const int index = board_sd_frame_index(request.sd_name);
     if (index >= 0) {
         s_frame_index = index;
     }
-    return true;
+    return ESP_OK;
 }
 
 /**
@@ -581,15 +581,24 @@ void display_task(void *)
         if (picked.cmd != display_cmd::refresh ||
             (!inbox && !factory && step == 0 && current_pick.cmd != display_cmd::refresh)) {
             const auto &target = picked.cmd != display_cmd::refresh ? picked : current_pick;
-            if (show_picked_frame(target)) {
-                current_pick = target;
-                s_last_result = "ok";
+            const esp_err_t err = show_picked_frame(target);
+            if (picked.cmd == display_cmd::refresh && err == ESP_ERR_NOT_FOUND) {
+                // 原件已被删除，由本次主动刷新重新走默认来源。
+                current_pick = {};
             } else {
-                ESP_LOGW(kTag, "选中的画面载入或上屏失败");
-                s_last_result = "load-failed";
-                led_event_post(LED_EV_ANOMALY, 0);
+                if (err == ESP_OK) {
+                    current_pick = target;
+                    s_last_result = "ok";
+                } else {
+                    ESP_LOGW(kTag, "选中的画面载入或上屏失败");
+                    s_last_result = "load-failed";
+                    led_event_post(LED_EV_ANOMALY, 0);
+                }
+                s_display_state = display_state::idle;
+                continue;
             }
-        } else if (inbox) {
+        }
+        if (inbox) {
             // 上传槽里的图优先于同一批里的翻页：图刚写进去，这一轮就该把它刷上屏。
             if (artifacts_draw_inbox_frame() == ESP_OK) {
                 const bool shown = present_back("上传的画面");

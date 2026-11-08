@@ -77,6 +77,16 @@ func DisplayDevicePicture(host, source, id string) error {
 	return gallery.Display(context.Background(), host, devicePort, gallery.Source(source), id)
 }
 
+// CanDeleteDevicePicture 判断图库条目是否可由用户删除。
+func CanDeleteDevicePicture(source, id string) bool {
+	return gallery.CanDelete(gallery.Source(source), id)
+}
+
+// DeleteDevicePicture 由 Android 在确认后调用，成功时设备已删除目标画面。
+func DeleteDevicePicture(host, source, id string) error {
+	return gallery.Delete(context.Background(), host, devicePort, gallery.Source(source), id)
+}
+
 // StorageInfo 持有一次读取返回的两种存储容量，由 Android 按来源显示。
 type StorageInfo struct {
 	usage gallery.StorageUsage

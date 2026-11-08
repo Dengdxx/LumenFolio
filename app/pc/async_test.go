@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"errors"
 	"image"
 	"image/color"
 	"image/png"
@@ -228,6 +229,67 @@ func TestGalleryRetainsThumbnailsOnlyAroundViewport(t *testing.T) {
 			t.Fatalf("应清除远离视口的缩略图 %s", id)
 		}
 	}
+}
+
+func TestGalleryDeleteRequiresConfirmationAndProtectsBoot(t *testing.T) {
+	u := newTestUI()
+	u.window = &waitingWindow{wake: make(chan struct{}, 1)}
+	g := &u.gallery
+	defer g.cancelRequest()
+	g.host, g.source, g.selected = "invalid host", gallery.Flash, "boot"
+	u.openGalleryDeleteConfirmation()
+	if g.confirming {
+		t.Fatal("开机画面不得进入删除确认")
+	}
+	g.source, g.selected = gallery.SD, "1.bin"
+	u.deleteGalleryPicture()
+	if g.request != nil {
+		t.Fatal("未经确认不得提交删除请求")
+	}
+	u.openGalleryDeleteConfirmation()
+	if !g.confirming || g.request != nil {
+		t.Fatal("首次点击只应进入确认")
+	}
+	active, cancel := context.WithCancel(context.Background())
+	g.request, g.cancel, g.kind = active, cancel, galleryDelete
+	u.deleteGalleryPicture()
+	if g.request != active {
+		t.Fatal("正在删除时不得重复提交")
+	}
+}
+
+func TestGalleryDeleteRefreshesOnlyAfterSuccess(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		u := newTestUI()
+		u.window = &waitingWindow{wake: make(chan struct{}, 1)}
+		defer u.closeGallery()
+		g := &u.gallery
+		// 非法地址让刷新请求在发网前返回，测试只验证结果处理。
+		g.host, g.source, g.selected = "invalid host", gallery.SD, "1.bin"
+		g.pictures = []gallery.Picture{{ID: "1.bin"}}
+		g.preview = paint.NewImageOp(image.NewNRGBA(image.Rect(0, 0, 3, 4)))
+		g.confirming = true
+		g.storage.SD.TotalBytes = 1000
+
+		failed, cancelFailed := context.WithCancel(context.Background())
+		g.request, g.cancel, g.kind = failed, cancelFailed, galleryDelete
+		g.results <- galleryResult{request: failed, err: errors.New("设备忙")}
+		u.applyPendingResults()
+		if !g.confirming || g.selected != "1.bin" || g.preview.Size().X == 0 || !g.actionError || g.request != nil || g.infoRequest != nil {
+			t.Fatal("删除失败后应保留选择和预览，允许重试")
+		}
+
+		succeeded, cancelSucceeded := context.WithCancel(context.Background())
+		g.request, g.cancel, g.kind = succeeded, cancelSucceeded, galleryDelete
+		g.results <- galleryResult{request: succeeded}
+		u.applyPendingResults()
+		if g.confirming || g.selected != "" || g.preview.Size().X != 0 || len(g.pictures) != 0 || g.actionStatus != "已删除图片" {
+			t.Fatal("删除成功后应清除预览并重读当前列表")
+		}
+		if g.infoRequest == nil && g.storage.SD.TotalBytes != 0 {
+			t.Fatal("删除成功后应刷新容量")
+		}
+	})
 }
 
 func TestPreviewAndFileResultsStayIndependent(t *testing.T) {

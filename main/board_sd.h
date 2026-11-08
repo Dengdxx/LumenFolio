@@ -132,6 +132,13 @@ esp_err_t board_sd_browse_page(const char *after, int limit, board_sd_frame_page
  */
 esp_err_t board_sd_browse_open(const char *name, size_t &size);
 
+/**
+ * @brief 在 SD 锁内校验根目录帧并删除原文件，不触发刷屏。
+ * @return ESP_OK 成功；ESP_ERR_INVALID_ARG 名称非法；ESP_ERR_INVALID_STATE 未挂载；
+ *         ESP_ERR_NOT_FOUND 文件不存在；ESP_ERR_INVALID_RESPONSE 帧头非法；ESP_FAIL 存储错误。
+ */
+esp_err_t board_sd_delete_frame(const char *name);
+
 /** @brief 从当前浏览文件顺序读取一块。调用方按 open 返回的总长分块读取。 */
 esp_err_t board_sd_browse_read(uint8_t *data, size_t size);
 

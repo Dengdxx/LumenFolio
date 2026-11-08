@@ -2,11 +2,13 @@
 
 #include <atomic>
 #include <dirent.h>
+#include <errno.h>
 #include <mutex>
 #include <stdio.h>
 #include <string.h>
 #include <strings.h>
 #include <sys/stat.h>
+#include <unistd.h>
 
 #include "board_pins.h"
 #include "driver/gpio.h"
@@ -262,37 +264,55 @@ int collect_frames(board_sd_frame_names &names)
 }
 
 /**
- * @brief 打开合法帧并定位到帧头，额外的文件尾字节不参与预览。
+ * @brief 打开合法帧并定位到帧头，额外的文件尾字节不计入编码长度。
  * @note 调用者持有 SD 锁并负责关闭。只检查帧头，不解码像素。
  */
-FILE *open_browse_frame(const char *name, size_t &size, board_sd_frame_revision *revision = nullptr)
+esp_err_t open_browse_path(const char *path, FILE *&file, size_t &size, board_sd_frame_revision *revision = nullptr)
 {
-    char path[sizeof(BOARD_SD_MOUNT_POINT) + BOARD_SD_FRAME_NAME_BYTES];
-    snprintf(path, sizeof(path), "%s/%s", BOARD_SD_MOUNT_POINT, name);
     struct stat stat_info = {};
-    if (stat(path, &stat_info) != 0 || !S_ISREG(stat_info.st_mode) ||
-        stat_info.st_size < EPD_FRAME_ZLIB_HEADER_BYTES) {
-        return nullptr;
+    if (stat(path, &stat_info) != 0) {
+        return errno == ENOENT ? ESP_ERR_NOT_FOUND : ESP_FAIL;
     }
-    FILE *file = fopen(path, "rb");
-    if (file == nullptr) {
-        return nullptr;
+    if (!S_ISREG(stat_info.st_mode)) {
+        return ESP_ERR_NOT_FOUND;
+    }
+    if (stat_info.st_size < EPD_FRAME_ZLIB_HEADER_BYTES) {
+        return ESP_ERR_INVALID_RESPONSE;
+    }
+    FILE *opened = fopen(path, "rb");
+    if (opened == nullptr) {
+        return errno == ENOENT ? ESP_ERR_NOT_FOUND : ESP_FAIL;
     }
     uint8_t header[EPD_FRAME_ZLIB_HEADER_BYTES];
     epd_frame_info_t info = {};
-    if (fread(header, 1, sizeof(header), file) != sizeof(header) ||
-        epd_frame_parse_header(header, sizeof(header), &info) != ESP_OK ||
-        info.frame_bytes > static_cast<size_t>(stat_info.st_size) ||
-        fseek(file, 0, SEEK_SET) != 0) {
-        fclose(file);
-        return nullptr;
+    esp_err_t err = ESP_OK;
+    if (fread(header, 1, sizeof(header), opened) != sizeof(header)) {
+        err = ferror(opened) ? ESP_FAIL : ESP_ERR_INVALID_RESPONSE;
+    } else if (epd_frame_parse_header(header, sizeof(header), &info) != ESP_OK ||
+               info.frame_bytes > static_cast<size_t>(stat_info.st_size)) {
+        err = ESP_ERR_INVALID_RESPONSE;
+    } else if (fseek(opened, 0, SEEK_SET) != 0) {
+        err = ESP_FAIL;
     }
+    if (err != ESP_OK) {
+        fclose(opened);
+        return err;
+    }
+    file = opened;
     size = info.frame_bytes;
     if (revision != nullptr) {
         revision->bytes = static_cast<size_t>(stat_info.st_size);
         revision->modified = stat_info.st_mtime;
     }
-    return file;
+    return ESP_OK;
+}
+
+FILE *open_browse_frame(const char *name, size_t &size, board_sd_frame_revision *revision = nullptr)
+{
+    char path[sizeof(BOARD_SD_MOUNT_POINT) + BOARD_SD_FRAME_NAME_BYTES];
+    snprintf(path, sizeof(path), "%s/%s", BOARD_SD_MOUNT_POINT, name);
+    FILE *file = nullptr;
+    return open_browse_path(path, file, size, revision) == ESP_OK ? file : nullptr;
 }
 
 }  // namespace
@@ -417,6 +437,30 @@ esp_err_t board_sd_browse_open(const char *name, size_t &size)
     }
     s_browse_file = open_browse_frame(name, size);
     return s_browse_file != nullptr ? ESP_OK : ESP_ERR_NOT_FOUND;
+}
+
+esp_err_t board_sd_delete_frame(const char *name)
+{
+    if (!is_frame_name(name)) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    std::lock_guard lock(s_sd_mutex);
+    if (s_card == nullptr) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    char path[sizeof(BOARD_SD_MOUNT_POINT) + BOARD_SD_FRAME_NAME_BYTES];
+    snprintf(path, sizeof(path), "%s/%s", BOARD_SD_MOUNT_POINT, name);
+    FILE *file = nullptr;
+    size_t size;
+    const esp_err_t err = open_browse_path(path, file, size);
+    if (err != ESP_OK) {
+        return err;
+    }
+    fclose(file);
+    if (unlink(path) != 0) {
+        return errno == ENOENT ? ESP_ERR_NOT_FOUND : ESP_FAIL;
+    }
+    return ESP_OK;
 }
 
 esp_err_t board_sd_browse_read(uint8_t *data, size_t size)

@@ -23,6 +23,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.ListItem
@@ -302,17 +303,86 @@ internal fun DevicePicturesScreen(
         }
     }
 
-    selected?.let { picture -> DevicePicturePreview(request, picture) { selected = null } }
+    selected?.let { picture ->
+        DevicePicturePreview(
+            request,
+            picture,
+            onDismiss = { selected = null },
+            onDeleted = {
+                selected = null
+                listRefresh++
+                infoRefresh++
+            },
+        )
+    }
 }
 
 @Composable
-private fun DevicePicturePreview(request: PictureListRequest, picture: DevicePicture, onDismiss: () -> Unit) {
+private fun DevicePicturePreview(
+    request: PictureListRequest,
+    picture: DevicePicture,
+    onDismiss: () -> Unit,
+    onDeleted: () -> Unit,
+) {
     val scope = rememberCoroutineScope()
     var display by remember(request, picture.id) { mutableStateOf<PictureRead<Unit>?>(null) }
+    val canDelete = remember(request.source, picture.id) {
+        Mobilepanel.canDeleteDevicePicture(request.source.id, picture.id)
+    }
+    var confirmingDelete by remember(request, picture.id) { mutableStateOf(false) }
+    var deleting by remember(request, picture.id) { mutableStateOf(false) }
+    var deleteError by remember(request, picture.id) { mutableStateOf<String?>(null) }
+    val deleteColors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)
     val result = readPicture(picture.id) {
         val png = Mobilepanel.previewDevicePicture(request.host, request.source.id, picture.id)
         BitmapFactory.decodeByteArray(png, 0, png.size)
             ?: throw IOException("无法解码相框图片")
+    }
+
+    if (confirmingDelete) {
+        AlertDialog(
+            onDismissRequest = { if (!deleting) confirmingDelete = false },
+            title = { Text("确认删除图片") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(picture.name)
+                    Text("来源 ${request.source.label}")
+                    if (deleting) PictureLoading("正在删除图片…")
+                    deleteError?.let { PictureMessage("删除失败，$it", error = true) }
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    enabled = !deleting,
+                    colors = deleteColors,
+                    onClick = {
+                        if (!deleting) {
+                            deleting = true
+                            deleteError = null
+                            scope.launch {
+                                try {
+                                    withContext(Dispatchers.IO) {
+                                        Mobilepanel.deleteDevicePicture(request.host, request.source.id, picture.id)
+                                    }
+                                } catch (error: CancellationException) {
+                                    throw error
+                                } catch (error: Exception) {
+                                    deleteError = error.localizedMessage ?: "请确认相框已唤醒且地址正确。"
+                                    return@launch
+                                } finally {
+                                    deleting = false
+                                }
+                                onDeleted()
+                            }
+                        }
+                    },
+                ) { Text("删除") }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmingDelete = false }, enabled = !deleting) { Text("取消") }
+            },
+        )
+        return
     }
 
     AlertDialog(
@@ -363,7 +433,21 @@ private fun DevicePicturePreview(request: PictureListRequest, picture: DevicePic
             ) { Text("在相框上显示") }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss, enabled = display != PictureRead.Loading) { Text("关闭") }
+            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                if (canDelete) {
+                    TextButton(
+                        enabled = display != PictureRead.Loading,
+                        colors = deleteColors,
+                        onClick = {
+                            if (display != PictureRead.Loading) {
+                                deleteError = null
+                                confirmingDelete = true
+                            }
+                        },
+                    ) { Text("删除") }
+                }
+                TextButton(onClick = onDismiss, enabled = display != PictureRead.Loading) { Text("关闭") }
+            }
         },
     )
 }

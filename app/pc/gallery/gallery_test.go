@@ -155,6 +155,45 @@ func TestThumbnailForCachesOnlyMatchingRevision(t *testing.T) {
 	}
 }
 
+func TestDeletePictureInvalidatesCachedThumbnail(t *testing.T) {
+	const id = "照片 + 100%.bin"
+	var downloads, deletions atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("source") != "sd" || r.URL.Query().Get("id") != id {
+			t.Errorf("请求的画面有误：%s", r.URL)
+		}
+		switch {
+		case r.Method == http.MethodDelete && r.URL.Path == "/frame" && r.ContentLength == 0:
+			deletions.Add(1)
+			w.WriteHeader(http.StatusNoContent)
+		case r.Method == http.MethodGet && r.URL.Path == "/frame/thumb":
+			downloads.Add(1)
+			w.Write(make([]byte, thumbnailBytes))
+		default:
+			t.Errorf("请求有误：%s %s", r.Method, r.URL)
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	host, port := serverAddress(t, server)
+	if err := Delete(t.Context(), host, port, Flash, "boot"); err == nil {
+		t.Fatal("开机画面应在发请求前拒绝删除")
+	}
+	picture := Picture{ID: id, Revision: "same-revision"}
+	if _, err := ThumbnailFor(t.Context(), host, port, SD, picture); err != nil {
+		t.Fatal(err)
+	}
+	if err := Delete(t.Context(), host, port, SD, id); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ThumbnailFor(t.Context(), host, port, SD, picture); err != nil {
+		t.Fatal(err)
+	}
+	if deletions.Load() != 1 || downloads.Load() != 2 {
+		t.Fatalf("删除后重新添加同版本图片应重新下载小图，删除 %d 次，下载 %d 次", deletions.Load(), downloads.Load())
+	}
+}
+
 func TestDisplayAndStorage(t *testing.T) {
 	const name = "相片 + 100%.bin"
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

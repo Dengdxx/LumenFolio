@@ -195,6 +195,27 @@ func Display(ctx context.Context, host string, port int, source Source, id strin
 	return err
 }
 
+// CanDelete 判断图库中的条目是否属于可删除的来源。开机槽由相框保护。
+func CanDelete(source Source, id string) bool {
+	return (source == SD && id != "") || (source == Flash && id == "inbox")
+}
+
+// Delete 删除相框中的 SD 帧或 Flash 上传画面。返回成功时设备已完成删除。
+func Delete(ctx context.Context, host string, port int, source Source, id string) error {
+	if !CanDelete(source, id) {
+		return fmt.Errorf("该画面不可删除")
+	}
+	_, err := request(ctx, http.MethodDelete, host, port, "/frame", frameQuery(source, id), http.StatusNoContent, 1024,
+		"相框上已找不到这张图片，请刷新列表")
+	if status, ok := err.(responseError); ok && status.status == http.StatusMethodNotAllowed {
+		return fmt.Errorf("相框固件暂不支持删除图片，请更新固件")
+	}
+	if err == nil {
+		forgetThumbnail(host, port, source, id)
+	}
+	return err
+}
+
 // Storage 读取两种存储的容量，SD 未挂载时该项的总量为零。
 func Storage(ctx context.Context, host string, port int) (StorageUsage, error) {
 	body, err := request(ctx, http.MethodGet, host, port, "/frames/storage", nil, http.StatusOK, 1024,

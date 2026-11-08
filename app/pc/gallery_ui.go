@@ -28,30 +28,34 @@ type galleryBrowser struct {
 	refreshListButton widget.Clickable
 	retryPageButton   widget.Clickable
 	displayButton     widget.Clickable
+	deleteButton      widget.Clickable
+	confirmDelete     widget.Clickable
+	cancelDelete      widget.Clickable
 	buttons           []*widget.Clickable
 	list              layout.List
 
-	host          string
-	source        gallery.Source
-	pictures      []gallery.Picture
-	pictureIndex  map[string]int
-	nextPage      string
-	pageErr       error
-	thumbnails    map[string]paint.ImageOp
-	thumbnailRow  int
-	selected      string
-	preview       paint.ImageOp
-	err           error
-	displayStatus string
-	displayError  bool
-	request       context.Context
-	kind          galleryRequestKind
-	cancel        context.CancelFunc
-	results       chan galleryResult
-	storage       gallery.StorageUsage
-	deviceStatus  string
-	infoRequest   context.Context
-	cancelInfo    context.CancelFunc
+	host         string
+	source       gallery.Source
+	pictures     []gallery.Picture
+	pictureIndex map[string]int
+	nextPage     string
+	pageErr      error
+	thumbnails   map[string]paint.ImageOp
+	thumbnailRow int
+	selected     string
+	preview      paint.ImageOp
+	err          error
+	actionStatus string
+	actionError  bool
+	confirming   bool
+	request      context.Context
+	kind         galleryRequestKind
+	cancel       context.CancelFunc
+	results      chan galleryResult
+	storage      gallery.StorageUsage
+	deviceStatus string
+	infoRequest  context.Context
+	cancelInfo   context.CancelFunc
 }
 
 type galleryRequestKind uint8
@@ -61,6 +65,7 @@ const (
 	galleryPage
 	galleryThumbnail
 	galleryDisplay
+	galleryDelete
 )
 
 const galleryLookahead = 2
@@ -99,6 +104,7 @@ func (u *ui) closeGallery() {
 	g.buttons = nil
 	g.thumbnails = nil
 	g.preview = paint.ImageOp{}
+	g.confirming = false
 	g.storage, g.deviceStatus = gallery.StorageUsage{}, ""
 }
 
@@ -112,7 +118,7 @@ func (u *ui) loadGallery(source gallery.Source) {
 	g.nextPage, g.pageErr = "", nil
 	g.selected = ""
 	g.preview, g.err = paint.ImageOp{}, nil
-	g.displayStatus, g.displayError = "", false
+	g.actionStatus, g.actionError, g.confirming = "", false, false
 	g.list = layout.List{Axis: layout.Vertical}
 	u.readGalleryPage("")
 }
@@ -135,7 +141,7 @@ func (u *ui) loadGalleryPreview(id string) {
 	g := &u.gallery
 	g.selected = id
 	g.preview, g.err = paint.ImageOp{}, nil
-	g.displayStatus, g.displayError = "", false
+	g.actionStatus, g.actionError, g.confirming = "", false, false
 	host, source := g.host, g.source
 	u.startGalleryRequest(func(ctx context.Context) galleryResult {
 		img, err := gallery.Preview(ctx, host, 8080, source, id)
@@ -203,15 +209,44 @@ func (u *ui) loadGalleryThumbnail(index int) {
 
 func (u *ui) displayGalleryPicture() {
 	g := &u.gallery
-	if g.selected == "" || g.preview.Size().X == 0 || g.kind == galleryDisplay {
+	if g.selected == "" || g.preview.Size().X == 0 || g.actionPending() || g.confirming {
 		return
 	}
 	host, source, id := g.host, g.source, g.selected
-	g.displayStatus, g.displayError = "正在安排显示…", false
+	g.actionStatus, g.actionError = "正在安排显示…", false
 	u.startGalleryRequest(func(ctx context.Context) galleryResult {
 		return galleryResult{err: gallery.Display(ctx, host, 8080, source, id)}
 	})
 	g.kind = galleryDisplay
+	u.window.Invalidate()
+}
+
+func (g *galleryBrowser) actionPending() bool {
+	return g.kind == galleryDisplay || g.kind == galleryDelete
+}
+
+func (u *ui) openGalleryDeleteConfirmation() {
+	g := &u.gallery
+	if !gallery.CanDelete(g.source, g.selected) || g.actionPending() || (g.request != nil && g.kind == galleryRead) {
+		return
+	}
+	g.confirming = true
+	g.actionStatus, g.actionError = "", false
+	u.window.Invalidate()
+}
+
+// deleteGalleryPicture 只提交已确认的来源与文件名，等待回执期间固定当前选择。
+func (u *ui) deleteGalleryPicture() {
+	g := &u.gallery
+	if !g.confirming || g.actionPending() || !gallery.CanDelete(g.source, g.selected) {
+		return
+	}
+	host, source, id := g.host, g.source, g.selected
+	g.actionStatus, g.actionError = "正在删除…", false
+	u.startGalleryRequest(func(ctx context.Context) galleryResult {
+		return galleryResult{err: gallery.Delete(ctx, host, 8080, source, id)}
+	})
+	g.kind = galleryDelete
 	u.window.Invalidate()
 }
 
@@ -266,15 +301,15 @@ func (g *galleryBrowser) cancelInfoRequest() {
 	}
 }
 
-// applyResult 只接收当前请求的结果，避免切换来源后展示先前的列表或图片。
-func (g *galleryBrowser) applyResult(result galleryResult) {
+// applyResult 只接收当前请求的结果。成功删除后返回 true，由窗口事件循环重新读取列表和容量。
+func (g *galleryBrowser) applyResult(result galleryResult) bool {
 	if g.infoRequest != nil && g.infoRequest == result.request {
 		g.cancelInfoRequest()
 		g.storage, g.deviceStatus = result.storage, result.status
-		return
+		return false
 	}
 	if g.request != result.request {
-		return
+		return false
 	}
 	kind := g.kind
 	g.cancelRequest()
@@ -284,28 +319,35 @@ func (g *galleryBrowser) applyResult(result galleryResult) {
 		if result.err == nil {
 			g.appendPage(result)
 		}
-		return
+		return false
 	case galleryThumbnail:
 		// 可见范围内的失败条目也保留占位，避免每一帧都重新发请求。
 		g.thumbnails[result.id] = result.preview
-		return
+		return false
 	case galleryDisplay:
-		g.displayError = result.err != nil
-		if g.displayError {
-			g.displayStatus = "安排显示失败：" + result.err.Error()
+		g.actionError = result.err != nil
+		if g.actionError {
+			g.actionStatus = "安排显示失败：" + result.err.Error()
 		} else {
-			g.displayStatus = "已安排显示，屏幕刷新约需 35 秒"
+			g.actionStatus = "已安排显示，屏幕刷新约需 35 秒"
 		}
-		return
+		return false
+	case galleryDelete:
+		if result.err != nil {
+			g.actionStatus, g.actionError = "删除失败："+result.err.Error(), true
+			return false
+		}
+		return true
 	}
 	g.err = result.err
 	if g.selected != "" {
 		g.preview = result.preview
-		return
+		return false
 	}
 	g.pictureIndex = make(map[string]int, len(result.pictures))
 	g.thumbnails = make(map[string]paint.ImageOp)
 	g.appendPage(result)
+	return false
 }
 
 // appendPage 按设备顺序追加未出现的条目。已有按钮的地址保持稳定，延续 Gio 焦点和点击状态。
@@ -322,8 +364,9 @@ func (g *galleryBrowser) appendPage(result galleryResult) {
 }
 
 func (u *ui) galleryLayout(gtx layout.Context) layout.Dimensions {
+	g := &u.gallery
 	// 保留正在提交的目标，等相框返回后再允许切换来源或图片。
-	if u.gallery.kind == galleryDisplay {
+	if g.actionPending() {
 		gtx = gtx.Disabled()
 	}
 	return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
@@ -472,45 +515,62 @@ func (u *ui) galleryThumbnail(gtx layout.Context, thumbnail paint.ImageOp, loade
 func (u *ui) galleryPreview(gtx layout.Context) layout.Dimensions {
 	g := &u.gallery
 	return layout.UniformInset(unit.Dp(24)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-		if g.preview.Size().X > 0 {
+		if g.preview.Size().X > 0 || gallery.CanDelete(g.source, g.selected) {
 			return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
-				layout.Flexed(1, func(gtx layout.Context) layout.Dimensions { return framePicture(gtx, g.preview) }),
+				layout.Flexed(1, u.galleryPicture),
 				layout.Rigid(gap(12)),
-				layout.Rigid(u.galleryDisplayControls),
+				layout.Rigid(u.galleryControls),
 			)
 		}
-		message := "选择一张图片查看预览"
-		switch {
-		case g.err != nil:
-			message = g.err.Error()
-		case g.request != nil && g.kind == galleryRead && g.selected == "":
-			message = "正在读取图片列表…"
-		case g.request != nil && g.kind == galleryRead:
-			message = "正在读取图片…"
-		case len(g.pictures) == 0:
-			message = "此来源暂无可预览图片"
-		}
-		label := material.Body1(u.theme, message)
-		label.Color = u.colors.muted
-		if g.err != nil {
-			label.Color = u.colors.error
-		}
-		label.Alignment = text.Middle
-		return layout.Center.Layout(gtx, label.Layout)
+		return u.galleryPicture(gtx)
 	})
 }
 
-func (u *ui) galleryDisplayControls(gtx layout.Context) layout.Dimensions {
+func (u *ui) galleryPicture(gtx layout.Context) layout.Dimensions {
+	g := &u.gallery
+	if g.preview.Size().X > 0 {
+		return framePicture(gtx, g.preview)
+	}
+	message := "选择一张图片查看预览"
+	switch {
+	case g.err != nil:
+		message = g.err.Error()
+		if g.selected == "" && g.actionStatus != "" {
+			message = g.actionStatus + "。刷新列表失败：" + message
+		}
+	case g.selected == "" && g.actionStatus != "":
+		message = g.actionStatus
+	case g.request != nil && g.kind == galleryRead && g.selected == "":
+		message = "正在读取图片列表…"
+	case g.request != nil && g.kind == galleryRead:
+		message = "正在读取图片…"
+	case len(g.pictures) == 0:
+		message = "此来源暂无可预览图片"
+	}
+	label := material.Body1(u.theme, message)
+	label.Color = u.colors.muted
+	if g.err != nil {
+		label.Color = u.colors.error
+	}
+	label.Alignment = text.Middle
+	return layout.Center.Layout(gtx, label.Layout)
+}
+
+func (u *ui) galleryControls(gtx layout.Context) layout.Dimensions {
 	g := &u.gallery
 	return layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 		gtx.Constraints.Max.X = min(gtx.Constraints.Max.X, gtx.Dp(320))
+		controls := u.galleryActionButtons
+		if g.confirming {
+			controls = u.galleryDeleteConfirmation
+		}
 		return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
-			layout.Rigid(u.primaryButton("在相框上显示", &g.displayButton, u.displayGalleryPicture)),
+			layout.Rigid(controls),
 			layout.Rigid(gap(6)),
 			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-				label := material.Body2(u.theme, g.displayStatus)
+				label := material.Body2(u.theme, g.actionStatus)
 				label.Color = u.colors.muted
-				if g.displayError {
+				if g.actionError {
 					label.Color = u.colors.error
 				}
 				label.Alignment = text.Middle
@@ -519,4 +579,52 @@ func (u *ui) galleryDisplayControls(gtx layout.Context) layout.Dimensions {
 			}),
 		)
 	})
+}
+
+func (u *ui) galleryActionButtons(gtx layout.Context) layout.Dimensions {
+	g := &u.gallery
+	display := u.primaryButton("在相框上显示", &g.displayButton, u.displayGalleryPicture)
+	if !gallery.CanDelete(g.source, g.selected) {
+		return display(gtx)
+	}
+	deleteButton := u.button("删除图片", &g.deleteButton, u.openGalleryDeleteConfirmation)
+	if g.preview.Size().X == 0 {
+		if g.request != nil && g.kind == galleryRead {
+			gtx = gtx.Disabled()
+		}
+		return deleteButton(gtx)
+	}
+	return layout.Flex{Axis: layout.Horizontal}.Layout(gtx,
+		layout.Flexed(1, display),
+		layout.Rigid(gap(8)),
+		layout.Flexed(1, deleteButton),
+	)
+}
+
+func (u *ui) galleryDeleteConfirmation(gtx layout.Context) layout.Dimensions {
+	g := &u.gallery
+	name := g.pictures[g.pictureIndex[g.selected]].Name
+	source := "SD 卡"
+	if g.source == gallery.Flash {
+		source = "Flash artifacts · 上传槽"
+	}
+	message := material.Body2(u.theme, "确认永久删除此图片？\n名称 · "+name+"\n来源 · "+source)
+	message.Color = u.colors.error
+	return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+		layout.Rigid(message.Layout),
+		layout.Rigid(gap(8)),
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			return layout.Flex{Axis: layout.Horizontal}.Layout(gtx,
+				layout.Flexed(1, u.button("取消", &g.cancelDelete, func() {
+					if !g.actionPending() {
+						g.confirming = false
+						g.actionStatus, g.actionError = "", false
+						u.window.Invalidate()
+					}
+				})),
+				layout.Rigid(gap(8)),
+				layout.Flexed(1, u.primaryButton("确认删除", &g.confirmDelete, u.deleteGalleryPicture)),
+			)
+		}),
+	)
 }

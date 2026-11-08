@@ -492,6 +492,51 @@ esp_err_t handle_frame_display(httpd_req_t *request)
     return httpd_resp_sendstr(request, "画面刷新已排队\n");
 }
 
+/** @brief DELETE /frame 仅删除 SD 根目录帧或上传槽原件，显示任务不入队。 */
+esp_err_t handle_frame_delete(httpd_req_t *request)
+{
+    encoded_id id;
+    const frame_source source = parse_query(request, &id);
+    if (source == frame_source::invalid || request->content_len != 0) {
+        return httpd_resp_send_err(request, HTTPD_400_BAD_REQUEST, "需要有效的 source 和 id，且请求体须为空");
+    }
+    const FrameTransfer transfer;
+    esp_err_t err;
+    if (source == frame_source::sd) {
+        err = board_sd_delete_frame(id);
+    } else {
+        const auto *slot = find_slot(id);
+        if (slot == nullptr) {
+            return httpd_resp_send_err(request, HTTPD_404_NOT_FOUND, "画面不存在");
+        }
+        if (!slot->inbox) {
+            return httpd_resp_send_err(request, HTTPD_403_FORBIDDEN, "开机画面受保护");
+        }
+        size_t size;
+        // HTTP 服务串行处理上传和删除，擦除与后台解码由 artifacts 锁互斥。
+        err = artifacts_frame_size(true, &size);
+        if (err == ESP_OK) err = artifacts_inbox_discard();
+    }
+
+    switch (err) {
+    case ESP_OK:
+        httpd_resp_set_status(request, "204 No Content");
+        return httpd_resp_send(request, nullptr, 0);
+    case ESP_ERR_INVALID_ARG:
+        return httpd_resp_send_err(request, HTTPD_400_BAD_REQUEST, "帧文件名非法");
+    case ESP_ERR_NOT_FOUND:
+        return httpd_resp_send_err(request, HTTPD_404_NOT_FOUND, "画面不存在");
+    case ESP_ERR_INVALID_STATE:
+        httpd_resp_set_status(request, "503 Service Unavailable");
+        return httpd_resp_sendstr(request, "SD 卡未挂载\n");
+    case ESP_ERR_INVALID_RESPONSE:
+        httpd_resp_set_status(request, "422 Unprocessable Content");
+        return httpd_resp_sendstr(request, "文件不是有效帧\n");
+    default:
+        return httpd_resp_send_err(request, HTTPD_500_INTERNAL_SERVER_ERROR, "存储错误，无法删除画面");
+    }
+}
+
 }  // namespace
 
 esp_err_t app_register_frame_browse()
@@ -500,6 +545,7 @@ esp_err_t app_register_frame_browse()
         {.uri = "/frames", .method = HTTP_GET, .handler = handle_frame_list, .user_ctx = nullptr},
         {.uri = "/frames/storage", .method = HTTP_GET, .handler = handle_frame_storage, .user_ctx = nullptr},
         {.uri = "/frame", .method = HTTP_GET, .handler = handle_frame_download, .user_ctx = nullptr},
+        {.uri = "/frame", .method = HTTP_DELETE, .handler = handle_frame_delete, .user_ctx = nullptr},
         {.uri = "/frame/thumb", .method = HTTP_GET, .handler = handle_frame_thumbnail, .user_ctx = nullptr},
         {.uri = "/frame/display", .method = HTTP_POST, .handler = handle_frame_display, .user_ctx = nullptr},
     };
