@@ -13,6 +13,14 @@ Android 版与 [Windows 图形界面](../../docs/preview.md) 共用取景、六�
 
 在顶部点「相框图片」，输入相框地址并读取列表。切换「Flash artifacts」查看开机画面和最近上传的画面，切换「SD 卡」查看卡上的帧文件。点列表中的文件名预览相框保存的六色画面。
 
+## 固件升级
+
+1. 将应用固件 `LumenFolio.bin` 下载到手机，把手机和相框连到同一个可信局域网，并唤醒相框。
+2. 在「上传与导出」中点「固件升级」，填写相框地址，选择本地 `.bin`，核对显示的版本。
+3. 点「开始升级」，核对相框地址和版本后确认。保持相框供电和网络连接，让 App 保持打开，直到显示新固件已启动并确认。
+
+首次部署、旧分区布局的迁移和故障恢复见 [局域网 OTA](../../docs/ota.md)。
+
 ## 工程准备
 
 需要 Go 1.27、JDK 17、Android SDK 36、Android NDK 和 Gradle 8.13。设置 `ANDROID_HOME` 指向 SDK。NDK 可以由 SDK Manager 并排安装，也可以用 `ANDROID_NDK_HOME` 指定。App 的最低系统版本为 Android 8.0。
@@ -26,7 +34,7 @@ go install tool
 $toolBin = go env GOBIN
 if (-not $toolBin) { $toolBin = Join-Path (go env GOPATH) 'bin' }
 $env:Path = "$toolBin;$env:Path"
-gomobile bind -target=android -androidapi 26 -javapkg=org.lumenfolio -o ../app/libs/mobilepanel.aar .
+gomobile bind -target=android -androidapi 26 '-javapkg=org.lumenfolio' -o ../app/libs/mobilepanel.aar .
 Pop-Location
 ```
 
@@ -38,5 +46,6 @@ Pop-Location
 - 上传返回 HTTP 404 → 固件可能还没有传图接口 → 换成支持 `POST /frame` 的固件后再试。
 - 读取列表时提示固件不支持浏览 → 当前固件缺少读图接口 → 更新相框固件后刷新列表。
 - 提示 SD 卡未挂载 → 相框当前无法读卡 → 插好 SD 卡并唤醒相框，再刷新列表。
+- 上传完成后提示固件升级未确认 → 相框重启后仍需联网确认镜像 → 保持相框供电和联网，核对相框地址后选择同一固件重试。设备已运行该镜像并等待确认时，App 会继续确认。
 - 设备无响应 → 可能处于深睡 → 按机身键唤醒并确认手机与相框仍处于同一个局域网。
 - 已接收但画面还没换 → 202 只确认写入，整帧刷新约 35 秒 → 以实际屏幕为准；若 App 提示刷新未排队，等当前操作结束后再发送。

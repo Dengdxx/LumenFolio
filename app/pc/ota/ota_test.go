@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -46,8 +47,16 @@ func otaAddress(t *testing.T, server *httptest.Server) (string, string) {
 }
 
 func TestOTASuccessAndLostReplies(t *testing.T) {
-	for _, loseReplies := range []bool{false, true} {
-		t.Run(map[bool]string{false: "normal", true: "lost replies"}[loseReplies], func(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		loseReplies bool
+		app         bool
+	}{
+		{name: "CLI"},
+		{name: "CLI with lost replies", loseReplies: true},
+		{name: "App with in-memory image", app: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
 			path, data := otaFixtureImage(t, "LumenFolio", "new-build")
 			status := otaStatus{Phase: "idle", Ready: false, Project: "LumenFolio", Version: "old-build", ImageID: strings.Repeat("cd", 32),
 				RunningPartition: "factory", BootPartition: "factory", UpdatePartition: "ota_0", Capacity: 2 * 1024 * 1024}
@@ -82,7 +91,7 @@ func TestOTASuccessAndLostReplies(t *testing.T) {
 					status.RunningPartition = "ota_0"
 					status.BootPartition = "ota_0"
 					status.UpdatePartition = "ota_1"
-					if loseReplies {
+					if tc.loseReplies {
 						connection, _, err := w.(http.Hijacker).Hijack()
 						if err != nil {
 							t.Error(err)
@@ -100,7 +109,7 @@ func TestOTASuccessAndLostReplies(t *testing.T) {
 					}
 					status.PendingVerify = false
 					status.Phase = "idle"
-					if loseReplies {
+					if tc.loseReplies {
 						connection, _, err := w.(http.Hijacker).Hijack()
 						if err != nil {
 							t.Error(err)
@@ -116,11 +125,43 @@ func TestOTASuccessAndLostReplies(t *testing.T) {
 			}))
 			defer server.Close()
 			host, port := otaAddress(t, server)
-			var out, errOut bytes.Buffer
-			// 走真实的命令行入口。界面不经过 run，命令行只分发 ota。
-			code := Run(context.Background(), host, []string{"--http-port", port, "--wait-timeout", "2s", path}, &out, &errOut)
-			if code != 0 || !strings.Contains(out.String(), "已在 ota_0 启动并确认") {
-				t.Fatalf("code=%d out=%s err=%s", code, &out, &errOut)
+			if tc.app {
+				source := bytes.NewReader(data)
+				size := int64(len(data))
+				version, err := Inspect(source, size)
+				if err != nil || version != "new-build" {
+					t.Fatalf("version=%q err=%v", version, err)
+				}
+				portNumber, err := strconv.Atoi(port)
+				if err != nil {
+					t.Fatal(err)
+				}
+				var updates []Progress
+				ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+				defer cancel()
+				if err := Upgrade(ctx, host, portNumber, source, size, func(update Progress) {
+					updates = append(updates, update)
+				}); err != nil {
+					t.Fatal(err)
+				}
+				var sent int64
+				for _, update := range updates {
+					if update.Total > 0 {
+						if update.Total != size || update.Sent <= sent || update.Sent > size {
+							t.Fatalf("invalid transfer progress: %+v", update)
+						}
+						sent = update.Sent
+					}
+				}
+				if sent != size || !strings.Contains(updates[len(updates)-1].Message, "已在 ota_0 启动并确认") {
+					t.Fatalf("incomplete App progress: %+v", updates)
+				}
+			} else {
+				var out, errOut bytes.Buffer
+				code := Run(context.Background(), host, []string{"--http-port", port, "--wait-timeout", "2s", path}, &out, &errOut)
+				if code != 0 || !strings.Contains(out.String(), "已在 ota_0 启动并确认") {
+					t.Fatalf("code=%d out=%s err=%s", code, &out, &errOut)
+				}
 			}
 			mu.Lock()
 			defer mu.Unlock()
@@ -265,13 +306,9 @@ type otaRoundTripFunc func(*http.Request) (*http.Response, error)
 func (f otaRoundTripFunc) RoundTrip(request *http.Request) (*http.Response, error) { return f(request) }
 
 func TestOTAEarlyRejectionStopsProgress(t *testing.T) {
-	path, _ := otaFixtureImage(t, "LumenFolio", "new")
-	file, err := os.Open(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer file.Close()
-	image, err := readOTAImage(file)
+	_, data := otaFixtureImage(t, "LumenFolio", "new")
+	source := bytes.NewReader(data)
+	image, err := readOTAImage(source, int64(len(data)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -280,17 +317,19 @@ func TestOTAEarlyRejectionStopsProgress(t *testing.T) {
 		body = request.Body
 		return &http.Response{StatusCode: 409, Header: make(http.Header), Body: io.NopCloser(strings.NewReader("busy")), Request: request}, nil
 	})}
-	var out bytes.Buffer
-	_, uncertain, err := uploadOTA(context.Background(), client, "http://device", file, image, &out)
+	var updates []Progress
+	_, uncertain, err := uploadOTA(context.Background(), client, "http://device", source, image, func(update Progress) {
+		updates = append(updates, update)
+	})
 	if err == nil || uncertain {
 		t.Fatalf("uncertain=%v error=%v", uncertain, err)
 	}
 	// RoundTripper may finish consuming/closing the request body asynchronously after Do returns.
-	if _, err := io.Copy(io.Discard, body); err != nil {
-		t.Fatal(err)
+	if n, err := io.Copy(io.Discard, body); n != 0 || err != nil {
+		t.Fatalf("late read after rejection: %d bytes, %v", n, err)
 	}
 	body.Close()
-	if out.Len() != 0 {
-		t.Fatalf("late progress after rejection: %s", &out)
+	if len(updates) != 0 {
+		t.Fatalf("late progress after rejection: %+v", updates)
 	}
 }

@@ -5,6 +5,7 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.net.Uri
+import android.provider.OpenableColumns
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.referentialEqualityPolicy
@@ -17,8 +18,11 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
@@ -26,6 +30,7 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import org.lumenfolio.mobilepanel.Crop
 import org.lumenfolio.mobilepanel.Mobilepanel
+import org.lumenfolio.mobilepanel.OTAListener
 import org.lumenfolio.mobilepanel.Picture
 import org.lumenfolio.mobilepanel.Rendered
 
@@ -37,6 +42,11 @@ internal data class EditorPicture(
     val height: Int,
     val crop: Crop,
 )
+
+/** 确认界面展示的版本和上传的数据来自同一份已选镜像。 */
+internal class SelectedFirmware(val name: String, val version: String, val data: ByteArray)
+
+internal data class FirmwareFeedback(val message: String, val fraction: Float? = null, val error: Boolean = false)
 
 internal class FrameUploadViewModel(application: Application) : AndroidViewModel(application) {
     private val preferences = application.getSharedPreferences("lumenfolio", Context.MODE_PRIVATE)
@@ -61,6 +71,10 @@ internal class FrameUploadViewModel(application: Application) : AndroidViewModel
     var reply by mutableStateOf<FrameClient.Reply?>(null)
         private set
     var message by mutableStateOf<String?>(null)
+        private set
+    var firmware by mutableStateOf<SelectedFirmware?>(null)
+        private set
+    var firmwareFeedback by mutableStateOf<FirmwareFeedback?>(null)
         private set
 
     private data class RenderCache(
@@ -142,7 +156,7 @@ internal class FrameUploadViewModel(application: Application) : AndroidViewModel
         reply = null
     }
 
-    /** 上传和浏览使用同一个最近连接成功的相框地址。 */
+    /** 传图、浏览和固件升级使用同一个最近连接成功的相框地址。 */
     fun rememberAddress(host: String) {
         preferences.edit().putString("frame_address", host).apply()
     }
@@ -186,7 +200,72 @@ internal class FrameUploadViewModel(application: Application) : AndroidViewModel
         }
     }
 
-    private fun runOperation(upload: Boolean = false, failure: String, action: suspend () -> Unit) {
+    fun selectFirmware(uri: Uri) {
+        runOperation(failure = "没能读取固件", onFailure = ::firmwareError) {
+            firmware = null
+            firmwareFeedback = FirmwareFeedback("正在读取固件…")
+            firmware = withContext(Dispatchers.IO) {
+                val name = contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)
+                    ?.use { if (it.moveToFirst()) it.getString(0) else null }
+                    ?: "已选择的固件"
+                // 按应用槽上限读取一个额外字节，以识别过大的文件，避免把任意文件全部读进内存。
+                val buffer = ByteArray(0x180000 + 1)
+                val length = contentResolver.openInputStream(uri)?.use { input ->
+                    var offset = 0
+                    while (offset < buffer.size) {
+                        val count = input.read(buffer, offset, buffer.size - offset)
+                        if (count < 0) break
+                        offset += count
+                    }
+                    offset
+                } ?: throw IOException("无法读取选中的固件")
+                if (length == buffer.size) throw IOException("固件超过 1.5 MiB 应用槽容量")
+                val bytes = buffer.copyOf(length)
+                SelectedFirmware(name, Mobilepanel.inspectFirmware(bytes), bytes)
+            }
+            firmwareFeedback = null
+        }
+    }
+
+    /** ViewModel 持有升级任务，配置变化时重用同一事务，避免重新上传或丢失确认。 */
+    fun upgradeFirmware() {
+        val selected = firmware ?: return
+        val host = address.trim()
+        if (host.isEmpty()) return
+        runOperation(failure = "固件升级未确认", onFailure = ::firmwareError) {
+            coroutineScope {
+                val updates = MutableStateFlow(FirmwareFeedback("正在查询相框…"))
+                firmwareFeedback = updates.value
+                val collector = launch { updates.collect { firmwareFeedback = it } }
+                try {
+                    withContext(Dispatchers.IO) {
+                        Mobilepanel.upgradeFirmware(host, selected.data, object : OTAListener {
+                            override fun onProgress(message: String, sent: Long, total: Long) {
+                                val fraction = if (total > 0) (sent.toFloat() / total).coerceIn(0f, 1f) else null
+                                updates.value = FirmwareFeedback(message, fraction)
+                            }
+                        })
+                    }
+                } finally {
+                    collector.cancel()
+                }
+            }
+            rememberAddress(host)
+            firmware = null
+            firmwareFeedback = FirmwareFeedback("固件 ${selected.version} 已启动并确认。")
+        }
+    }
+
+    private fun firmwareError(text: String) {
+        firmwareFeedback = FirmwareFeedback(text, error = true)
+    }
+
+    private fun runOperation(
+        upload: Boolean = false,
+        failure: String,
+        onFailure: (String) -> Unit = { message = it },
+        action: suspend () -> Unit,
+    ) {
         if (busy) return
         stopPreview()
         busy = true
@@ -199,7 +278,7 @@ internal class FrameUploadViewModel(application: Application) : AndroidViewModel
             } catch (error: CancellationException) {
                 throw error
             } catch (error: Exception) {
-                message = "$failure：${error.localizedMessage.orEmpty()}"
+                onFailure("$failure：${error.localizedMessage.orEmpty()}")
             } finally {
                 busy = false
                 sending = false

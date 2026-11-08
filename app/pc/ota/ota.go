@@ -22,6 +22,11 @@ import (
 	"time"
 )
 
+const (
+	defaultUploadTimeout = 3 * time.Minute
+	defaultWaitTimeout   = 90 * time.Second
+)
+
 // otaStatus 是设备 /ota/status 与 OTA 接口返回的 JSON 状态。
 type otaStatus struct {
 	Phase            string `json:"phase"`             // 设备 OTA 状态机阶段，如 idle、reboot_pending、rollback_failed
@@ -54,22 +59,25 @@ type otaImage struct {
 	Size    int64  // 文件字节数
 }
 
+// Inspect 读取应用镜像的版本，供用户选择固件时核对。size 是源的总字节数。
+// 此步骤仅检查镜像描述，完整校验在设备写入时进行。
+func Inspect(source io.ReaderAt, size int64) (version string, err error) {
+	image, err := readOTAImage(source, size)
+	return image.Version, err
+}
+
 // readOTAImage 从应用 .bin 提取工程名、版本、镜像标识和文件大小。
 //
 // IDF 的应用描述位于首个 segment 开头：24 字节镜像头 + 8 字节 segment 头。
 // 完整校验留给设备 SDK；这里仅提取项目/版本等信息供上传校验和重启后的确认使用。
 // 文件必须是普通 ESP-IDF 应用镜像（首字节 0xe9、描述魔数 0xabcd5432），
 // 且工程为 LumenFolio、版本非空且不含非法 HTTP 头字符。
-func readOTAImage(file *os.File) (otaImage, error) {
-	info, err := file.Stat()
-	if err != nil {
-		return otaImage{}, err
-	}
+func readOTAImage(source io.ReaderAt, size int64) (otaImage, error) {
 	var prefix [32 + 256]byte
-	if !info.Mode().IsRegular() {
-		return otaImage{}, errors.New("OTA 输入必须是普通应用 .bin 文件")
+	if size < int64(len(prefix)) {
+		return otaImage{}, fmt.Errorf("读取应用镜像头: %w", io.EOF)
 	}
-	if _, err := file.ReadAt(prefix[:], 0); err != nil {
+	if _, err := source.ReadAt(prefix[:], 0); err != nil {
 		return otaImage{}, fmt.Errorf("读取应用镜像头: %w", err)
 	}
 	if prefix[0] != 0xe9 || binary.LittleEndian.Uint32(prefix[32:36]) != 0xabcd5432 {
@@ -82,7 +90,7 @@ func readOTAImage(file *os.File) (otaImage, error) {
 		return string(value)
 	}
 	image := otaImage{Version: field(prefix[48:80]), Project: field(prefix[80:112]),
-		ImageID: hex.EncodeToString(prefix[176:208]), Size: info.Size()}
+		ImageID: hex.EncodeToString(prefix[176:208]), Size: size}
 	if image.Project != "LumenFolio" || image.Version == "" {
 		return otaImage{}, errors.New("镜像必须属于 LumenFolio，且包含版本信息")
 	}
@@ -192,34 +200,42 @@ func waitOTA(ctx context.Context, client *http.Client, base string, image otaIma
 	}
 }
 
-// otaProgress 包装上传请求体，统计 HTTP 客户端读取的字节并向 out 汇报进度。
+// Progress 是一次 OTA 进度更新。Total 大于 0 时 Sent 表示 HTTP 客户端读取的字节数。
+// 设备写入或校验的结果以随后阶段为准。Total 为 0 时 Message 描述当前阶段。
+type Progress struct {
+	Message     string
+	Sent, Total int64
+}
+
+// otaProgress 包装上传请求体，统计 HTTP 客户端读取的字节并汇报进度。
 //
 // 读取进度不代表设备已经收到、写入或验证镜像。closed 在上传结束后由调用方置位，
-// 阻止后台请求体读取继续写输出；mu 保护 closed、sent 和 last。
+// 阻止后台继续访问镜像或汇报进度，调用方此时可以关闭本地镜像。
 type otaProgress struct {
-	mu     sync.Mutex // 保护 sent、last 和 closed；Read 可能由 net/http 的后台 goroutine 调用
+	mu     sync.Mutex // 同步镜像读取和上传完成，Read 可能由 net/http 的后台 goroutine 调用
 	closed bool       // 上传结束后置位，之后不再输出进度
 	reader io.Reader  // 应用镜像文件
-	out    io.Writer  // 进度输出
-	total  int64      // 镜像总字节数
-	sent   int64      // 已读取字节数
-	last   int64      // 上次输出的百分比
+	report func(Progress)
+	total  int64 // 镜像总字节数
+	sent   int64 // 已读取字节数
+	last   int64 // 上次输出的百分比
 }
 
 // Read 实现 io.Reader：读取镜像，较上次输出增加至少 10 个百分点或到达 100% 时汇报进度。
 //
-// total 必须大于 0；上传结束后 closed 为 true，直接返回底层读取结果而不输出。
+// total 必须大于 0，上传结束后读请求体直接返回 EOF。
 func (progress *otaProgress) Read(buffer []byte) (int, error) {
-	n, err := progress.reader.Read(buffer)
 	progress.mu.Lock()
 	defer progress.mu.Unlock()
 	if progress.closed {
-		return n, err
+		return 0, io.EOF
 	}
+	n, err := progress.reader.Read(buffer)
 	progress.sent += int64(n)
 	percent := progress.sent * 100 / progress.total
 	if percent >= progress.last+10 || (percent == 100 && progress.last != 100) {
-		fmt.Fprintf(progress.out, "发送 %d%% (%d/%d 字节)\n", percent, progress.sent, progress.total)
+		progress.report(Progress{Message: fmt.Sprintf("发送 %d%% (%d/%d 字节)", percent, progress.sent, progress.total),
+			Sent: progress.sent, Total: progress.total})
 		progress.last = percent
 	}
 	return n, err
@@ -230,13 +246,13 @@ func (progress *otaProgress) Read(buffer []byte) (int, error) {
 // 返回设备状态、上传结果是否不确定（网络错误，或 2xx 应答无法解析）以及错误。
 // 设备不接收 chunked，因此必须显式设置 ContentLength；请求使用 Close=true，
 // 避免复用可能残留请求体的连接。函数返回后停止进度输出。
-func uploadOTA(ctx context.Context, client *http.Client, base string, file *os.File, image otaImage, out io.Writer) (otaStatus, bool, error) {
-	progress := &otaProgress{reader: file, out: out, total: image.Size}
+func uploadOTA(ctx context.Context, client *http.Client, base string, source io.ReaderAt, image otaImage, report func(Progress)) (otaStatus, bool, error) {
+	progress := &otaProgress{reader: io.NewSectionReader(source, 0, image.Size), report: report, total: image.Size}
 	request, err := http.NewRequestWithContext(ctx, http.MethodPost, base+"/ota", progress)
 	if err != nil {
 		return otaStatus{}, false, err
 	}
-	request.ContentLength = image.Size // os.File 包装后不能依赖 net/http 自动推断；设备不接收 chunked。
+	request.ContentLength = image.Size // 请求体包装后不能依赖 net/http 自动推断；设备不接收 chunked。
 	request.Header.Set("Content-Type", "application/octet-stream")
 	request.Close = true
 	response, err := client.Do(request)
@@ -252,7 +268,82 @@ func uploadOTA(ctx context.Context, client *http.Client, base string, file *os.F
 	return status, !definiteRejection && err != nil, err
 }
 
-// runOTA 执行 ota 子命令：status 打印状态 JSON，否则上传镜像并等待确认。
+// Upgrade 读取本地应用镜像，完成上传、重启核对和确认。设备确认了目标镜像后才返回成功。
+// report 可省略。回调串行执行，可能由 HTTP goroutine 调用，Upgrade 返回后不再调用。
+// 调用方须在 Upgrade 期间保持镜像数据可读且不变。取消 ctx 会停止本次客户端请求。
+func Upgrade(ctx context.Context, host string, port int, source io.ReaderAt, size int64, report func(Progress)) error {
+	host = strings.TrimSpace(host)
+	if host == "" || port < 1 || port > 65535 {
+		return errors.New("相框地址或 OTA 端口无效")
+	}
+	return upgrade(ctx, host, port, source, size, defaultUploadTimeout, defaultWaitTimeout, report)
+}
+
+func newOTAClient(host string, port int) (*http.Client, string) {
+	base := "http://" + net.JoinHostPort(host, strconv.Itoa(port))
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.Proxy = nil // 私有局域网固件直连设备，不经环境变量指定的代理。
+	return &http.Client{Transport: transport, CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
+		return http.ErrUseLastResponse
+	}}, base
+}
+
+func upgrade(ctx context.Context, host string, port int, source io.ReaderAt, size int64, uploadTimeout, waitTimeout time.Duration, report func(Progress)) error {
+	if report == nil {
+		report = func(Progress) {}
+	}
+	image, err := readOTAImage(source, size)
+	if err != nil {
+		return err
+	}
+	client, base := newOTAClient(host, port)
+	defer client.CloseIdleConnections()
+	status, err := getOTAStatus(ctx, client, base)
+	if err != nil {
+		return err
+	}
+	if status.Project != image.Project {
+		return fmt.Errorf("设备工程名 %q 与镜像工程名 %q 不一致", status.Project, image.Project)
+	}
+	partition := status.UpdatePartition
+	if status.PendingVerify && status.Version == image.Version && status.ImageID == image.ImageID {
+		partition = status.RunningPartition
+		report(Progress{Message: "目标版本已启动，继续自动确认。"})
+	} else {
+		if status.Phase != "idle" || status.PendingVerify {
+			return fmt.Errorf("设备尚未就绪或升级中：%s", status.Phase)
+		}
+		if partition == "" || status.Capacity == 0 {
+			return errors.New("设备没有 OTA 槽，需要先有线部署 OTA 引导版本")
+		}
+		if image.Size > status.Capacity {
+			return fmt.Errorf("镜像 %d 字节超过 OTA 槽 %d 字节", image.Size, status.Capacity)
+		}
+		report(Progress{Message: fmt.Sprintf("上传 %s，%d 字节，目标槽 %s；上传期间请勿断电或刷新屏幕。", image.Version, image.Size, partition)})
+		uploadContext, cancel := context.WithTimeout(ctx, uploadTimeout)
+		accepted, uncertain, uploadError := uploadOTA(uploadContext, client, base, source, image, report)
+		cancel()
+		if uploadError != nil {
+			if !uncertain || ctx.Err() != nil {
+				return uploadError
+			}
+			report(Progress{Message: fmt.Sprintf("上传答复未收到：%v；重连核对结果，不重复发送镜像。", uploadError)})
+		} else if accepted.Phase != "reboot_pending" || accepted.BootPartition != partition {
+			return errors.New("设备未返回预期的启动切换状态")
+		} else {
+			report(Progress{Message: "设备校验完成，等待重启与自动确认。"})
+		}
+	}
+	waitContext, cancel := context.WithTimeout(ctx, waitTimeout)
+	defer cancel()
+	if err := waitOTA(waitContext, client, base, image, partition, 250*time.Millisecond); err != nil {
+		return err
+	}
+	report(Progress{Message: fmt.Sprintf("OTA 成功：%s 已在 %s 启动并确认。", image.Version, partition)})
+	return nil
+}
+
+// Run 执行 ota 子命令：status 打印状态 JSON，否则上传镜像并等待确认。
 //
 // 位置参数为应用 .bin 路径或 status；--http-port 默认 8080，--upload-timeout
 // 默认 3 分钟，--wait-timeout 默认 90 秒。上传前校验工程、槽容量和设备空闲状态；
@@ -262,8 +353,8 @@ func Run(ctx context.Context, host string, args []string, out, errOut io.Writer)
 	flags := flag.NewFlagSet("ota", flag.ContinueOnError)
 	flags.SetOutput(errOut)
 	port := flags.Int("http-port", 8080, "设备 OTA HTTP 端口")
-	uploadTimeout := flags.Duration("upload-timeout", 3*time.Minute, "上传总时限")
-	waitTimeout := flags.Duration("wait-timeout", 90*time.Second, "等待重启和自动确认的时限")
+	uploadTimeout := flags.Duration("upload-timeout", defaultUploadTimeout, "上传总时限")
+	waitTimeout := flags.Duration("wait-timeout", defaultWaitTimeout, "等待重启和自动确认的时限")
 	if err := flags.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return 0
@@ -274,15 +365,10 @@ func Run(ctx context.Context, host string, args []string, out, errOut io.Writer)
 		fmt.Fprintln(errOut, "用法：LumenFolio --host IP ota [选项] 应用.bin|status")
 		return 2
 	}
-	base := "http://" + net.JoinHostPort(host, strconv.Itoa(*port))
-	transport := http.DefaultTransport.(*http.Transport).Clone()
-	transport.Proxy = nil // 私有局域网固件直连设备，不经环境变量指定的代理。
-	defer transport.CloseIdleConnections()
-	client := &http.Client{Transport: transport, CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
-		return http.ErrUseLastResponse
-	}}
 	fail := func(err error) int { fmt.Fprintln(errOut, "OTA:", err); return 1 }
 	if flags.Arg(0) == "status" {
+		client, base := newOTAClient(host, *port)
+		defer client.CloseIdleConnections()
 		status, err := getOTAStatus(ctx, client, base)
 		if err != nil {
 			return fail(err)
@@ -297,51 +383,17 @@ func Run(ctx context.Context, host string, args []string, out, errOut io.Writer)
 		return fail(err)
 	}
 	defer file.Close()
-	image, err := readOTAImage(file)
+	info, err := file.Stat()
 	if err != nil {
 		return fail(err)
 	}
-	status, err := getOTAStatus(ctx, client, base)
-	if err != nil {
+	if !info.Mode().IsRegular() {
+		return fail(errors.New("OTA 输入必须是普通应用 .bin 文件"))
+	}
+	if err := upgrade(ctx, host, *port, file, info.Size(), *uploadTimeout, *waitTimeout, func(progress Progress) {
+		fmt.Fprintln(out, progress.Message)
+	}); err != nil {
 		return fail(err)
 	}
-	if status.Project != image.Project {
-		return fail(fmt.Errorf("设备工程名 %q 与镜像工程名 %q 不一致", status.Project, image.Project))
-	}
-	partition := status.UpdatePartition
-	if status.PendingVerify && status.Version == image.Version && status.ImageID == image.ImageID {
-		partition = status.RunningPartition
-		fmt.Fprintln(out, "目标版本已启动，继续自动确认。")
-	} else {
-		if status.Phase != "idle" || status.PendingVerify {
-			return fail(fmt.Errorf("设备尚未就绪或升级中：%s", status.Phase))
-		}
-		if partition == "" || status.Capacity == 0 {
-			return fail(errors.New("设备没有 OTA 槽，需要先有线部署 OTA 引导版本"))
-		}
-		if image.Size > status.Capacity {
-			return fail(fmt.Errorf("镜像 %d 字节超过 OTA 槽 %d 字节", image.Size, status.Capacity))
-		}
-		fmt.Fprintf(out, "上传 %s，%d 字节，目标槽 %s；上传期间请勿断电或刷新屏幕。\n", image.Version, image.Size, partition)
-		uploadContext, cancel := context.WithTimeout(ctx, *uploadTimeout)
-		accepted, uncertain, uploadError := uploadOTA(uploadContext, client, base, file, image, out)
-		cancel()
-		if uploadError != nil {
-			if !uncertain || ctx.Err() != nil {
-				return fail(uploadError)
-			}
-			fmt.Fprintf(out, "上传答复未收到：%v；重连核对结果，不重复发送镜像。\n", uploadError)
-		} else if accepted.Phase != "reboot_pending" || accepted.BootPartition != partition {
-			return fail(errors.New("设备未返回预期的启动切换状态"))
-		} else {
-			fmt.Fprintln(out, "设备校验完成，等待重启与自动确认。")
-		}
-	}
-	waitContext, cancel := context.WithTimeout(ctx, *waitTimeout)
-	defer cancel()
-	if err := waitOTA(waitContext, client, base, image, partition, 250*time.Millisecond); err != nil {
-		return fail(err)
-	}
-	fmt.Fprintf(out, "OTA 成功：%s 已在 %s 启动并确认。\n", image.Version, partition)
 	return 0
 }

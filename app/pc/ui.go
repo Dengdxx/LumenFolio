@@ -127,8 +127,9 @@ type ui struct {
 	name      string
 	status    string
 	rendering bool // 当前构图和算法的六色预览正在计算
-	fileBusy  bool // 打开、上传和导出互斥，由 UI 事件循环维护
+	fileBusy  bool // 文件操作与升级互斥，由 UI 事件循环维护
 	gallery   galleryBrowser
+	ota       otaPage
 
 	// 交互状态
 	canvasTag bool
@@ -181,6 +182,7 @@ func newUI(shaper *text.Shaper, initialFile string) *ui {
 		ditherReq:   make(chan struct{}, 1),
 		jobResult:   make(chan string, 1),
 		gallery:     galleryBrowser{results: make(chan galleryResult, 1)},
+		ota:         otaPage{updates: make(chan otaUpdate, 1)},
 	}
 	ui.hostEditor.SingleLine = true
 	return ui
@@ -260,6 +262,15 @@ func (u *ui) applyPendingResults() (changed bool) {
 			u.fileBusy = false
 			u.status = text
 			changed = true
+		case update := <-u.ota.updates:
+			u.ota.progress = update.progress
+			if update.firmware != nil {
+				u.ota.firmware = *update.firmware
+			}
+			if update.finished {
+				u.fileBusy = false
+			}
+			changed = true
 		default:
 			return changed
 		}
@@ -321,6 +332,9 @@ func (u *ui) layout(gtx layout.Context) layout.Dimensions {
 	if u.gallery.host != "" {
 		return u.galleryLayout(gtx)
 	}
+	if u.ota.open {
+		return u.otaLayout(gtx)
+	}
 	return layout.Flex{Axis: layout.Horizontal}.Layout(gtx,
 		layout.Rigid(u.sidebar),
 		layout.Flexed(1, u.canvas),
@@ -352,6 +366,8 @@ func (u *ui) sidebar(gtx layout.Context) layout.Dimensions {
 			layout.Rigid(u.hostField),
 			layout.Rigid(gap(8)),
 			layout.Rigid(u.button("查看相框图片", &u.gallery.openButton, u.openGallery)),
+			layout.Rigid(gap(8)),
+			layout.Rigid(u.button("固件升级", &u.ota.openButton, u.openOTA)),
 			layout.Rigid(gap(8)),
 			layout.Rigid(u.button("上传到相框", &u.uploadButton, u.onUpload)),
 			layout.Rigid(gap(8)),

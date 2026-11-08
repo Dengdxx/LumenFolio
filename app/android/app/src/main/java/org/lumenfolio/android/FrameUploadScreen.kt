@@ -65,6 +65,8 @@ import org.lumenfolio.mobilepanel.Mobilepanel
 
 private val ControlShape = RoundedCornerShape(8.dp)
 
+private enum class FramePage { EDITOR, PICTURES, FIRMWARE }
+
 @Composable
 internal fun FrameUploadScreen(model: FrameUploadViewModel) {
     val openImage = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
@@ -76,14 +78,16 @@ internal fun FrameUploadScreen(model: FrameUploadViewModel) {
         uri?.let(model::exportPicture)
     }
 
-    var showingDevicePictures by rememberSaveable { mutableStateOf(false) }
+    var page by rememberSaveable { mutableStateOf(FramePage.EDITOR) }
     val editorScroll = rememberScrollState()
-    BackHandler(enabled = showingDevicePictures) { showingDevicePictures = false }
+    BackHandler(enabled = page != FramePage.EDITOR) {
+        if (!model.busy) page = FramePage.EDITOR
+    }
 
     Scaffold(
         topBar = {
-            LumenFolioTopBar(showingDevicePictures, !model.busy) {
-                showingDevicePictures = !showingDevicePictures
+            LumenFolioTopBar(page != FramePage.EDITOR, !model.busy) {
+                page = if (page == FramePage.EDITOR) FramePage.PICTURES else FramePage.EDITOR
             }
         },
     ) { insets ->
@@ -93,15 +97,15 @@ internal fun FrameUploadScreen(model: FrameUploadViewModel) {
             .consumeWindowInsets(insets)
             .imePadding()
 
-        if (showingDevicePictures) {
-            DevicePicturesScreen(
+        when (page) {
+            FramePage.PICTURES -> DevicePicturesScreen(
                 address = model.address,
                 onAddressChange = model::editAddress,
                 onConnected = model::rememberAddress,
                 modifier = contentModifier,
             )
-        } else {
-            Box(
+            FramePage.FIRMWARE -> FirmwareUpgradeScreen(model, contentModifier)
+            FramePage.EDITOR -> Box(
                 modifier = contentModifier
                     .verticalScroll(editorScroll)
                     .padding(horizontal = 16.dp, vertical = 20.dp),
@@ -112,7 +116,11 @@ internal fun FrameUploadScreen(model: FrameUploadViewModel) {
                     verticalArrangement = Arrangement.spacedBy(16.dp),
                 ) {
                     PicturePanel(model) { openImage.launch(arrayOf("image/png", "image/jpeg")) }
-                    FrameUploadPanel(model) { export.launch("frame.bin") }
+                    FrameUploadPanel(
+                        model,
+                        onExport = { export.launch("frame.bin") },
+                        onUpgrade = { page = FramePage.FIRMWARE },
+                    )
                 }
             }
         }
@@ -120,7 +128,7 @@ internal fun FrameUploadScreen(model: FrameUploadViewModel) {
 }
 
 @Composable
-private fun LumenFolioTopBar(showingDevicePictures: Boolean, enabled: Boolean, onSwitch: () -> Unit) {
+private fun LumenFolioTopBar(showingDevicePage: Boolean, enabled: Boolean, onSwitch: () -> Unit) {
     val colors = MaterialTheme.colorScheme
     Surface(color = colors.surface) {
         Column {
@@ -145,7 +153,7 @@ private fun LumenFolioTopBar(showingDevicePictures: Boolean, enabled: Boolean, o
                 }
                 Text("LumenFolio", Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
                 TextButton(onClick = onSwitch, enabled = enabled) {
-                    Text(if (showingDevicePictures) "返回取景" else "相框图片")
+                    Text(if (showingDevicePage) "返回取景" else "相框图片")
                 }
             }
             HorizontalDivider(color = colors.outlineVariant)
@@ -274,7 +282,7 @@ private fun InkSwatches() {
 }
 
 @Composable
-private fun FrameUploadPanel(model: FrameUploadViewModel, onExport: () -> Unit) {
+private fun FrameUploadPanel(model: FrameUploadViewModel, onExport: () -> Unit, onUpgrade: () -> Unit) {
     val colors = MaterialTheme.colorScheme
     val focusManager = LocalFocusManager.current
     val ready = model.editor != null && !model.busy
@@ -317,6 +325,17 @@ private fun FrameUploadPanel(model: FrameUploadViewModel, onExport: () -> Unit) 
             modifier = Modifier.fillMaxWidth(),
         ) {
             Text("导出帧文件")
+        }
+        OutlinedButton(
+            onClick = {
+                focusManager.clearFocus()
+                onUpgrade()
+            },
+            enabled = !model.busy,
+            shape = ControlShape,
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Text("固件升级")
         }
         val feedback = model.message ?: model.reply?.message
         if (feedback != null) {

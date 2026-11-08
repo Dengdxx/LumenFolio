@@ -9,8 +9,8 @@ LumenFolio 桌面端在 Windows 上以一个 exe 提供图形界面和命令行�
 - `app/pc/panel`：取景、按取景框采样、六色抖动和帧编解码。编码压得更小时是 EPD2，否则是 EPD1。解码直接用相同的墨水近似色还原设备帧，保留设备保存的像素。墨水索引与固件帧缓冲的半字节一致。
 - `app/pc/frame`：把一整帧 POST 到设备的 `/frame`。界面的「上传到相框」和命令行的 `frame` 都调用它。
 - `app/pc/gallery`：读取 Flash artifacts 或 SD 卡中的帧清单和六色预览，供 Windows 和 Android 配套 App 共用。
-- `app/pc/ota`：查询 `/ota/status`、上传应用镜像、等待重启并确认。命令行的 `ota` 子命令调用这个包。
-- 主包（`ui.go`、`gallery_ui.go`、`gesture.go`、`send.go`）：窗口、字体、控件、布局、屏幕坐标、拖拽和应用层操作。`app.Main` 只在打开界面时由主 goroutine 调用，命令行路径不进入它。
+- `app/pc/ota`：查询 `/ota/status`、上传应用镜像、等待重启并确认。Windows 和 Android 的「固件升级」以及命令行的 `ota` 子命令共用这个包。
+- 主包（`ui.go`、`gallery_ui.go`、`ota_ui.go`、`gesture.go`、`send.go`）：窗口、字体、控件、布局、屏幕坐标、拖拽和应用层操作。`app.Main` 只在打开界面时由主 goroutine 调用，命令行路径不进入它。
 
 这样分是因为 Gio 的事件循环会占住进程。共用包一旦引用 Gio，只跑命令行也会链进界面运行时。Go 也不允许在主包给 `panel.Crop` 增加方法，所以屏幕上的平移和旋转是主包函数，算完再调用 `Move`、`RotateAroundFrameCenter`、`Zoom`。
 
@@ -80,6 +80,10 @@ exe 不入库，源码没变就不要重新编译。不带参数打开空白界�
 ## 查看相框图片
 
 在侧栏填写相框地址，点击「查看相框图片」。顶部可在「Flash artifacts」和「SD 卡」间切换。Flash 列出已有帧的开机槽和上传槽，SD 卡列出相框已扫描的根目录 `.bin` 帧文件。点击列表项可以预览设备保存的六色画面，操作只读取设备数据。点击「刷新」重读当前来源，点击「返回」继续本地取景。
+
+## 固件升级
+
+点击侧栏的「固件升级」，填写相框地址并选择已下载的 `LumenFolio.bin`。核对文件名与版本后点击「确认升级」，等待应用显示新固件已启动并确认。设备和电脑需位于同一可信局域网。 [局域网 OTA](ota.md)
 
 ## 帧格式与兼容性
 
