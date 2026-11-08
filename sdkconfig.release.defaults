@@ -1,0 +1,2 @@
+# 发布应用镜像优先优化体积，为 OTA 槽留出空间。
+CONFIG_COMPILER_OPTIMIZATION_SIZE=y

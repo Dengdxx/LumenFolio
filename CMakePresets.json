@@ -1,0 +1,25 @@
+{
+  "version": 3,
+  "configurePresets": [
+    {
+      "name": "debug",
+      "displayName": "ESP32-S3 Debug",
+      "generator": "Ninja",
+      "binaryDir": "build/debug",
+      "cacheVariables": {
+        "SDKCONFIG": "build/debug/sdkconfig",
+        "SDKCONFIG_DEFAULTS": "sdkconfig.defaults"
+      }
+    },
+    {
+      "name": "release",
+      "displayName": "ESP32-S3 Release",
+      "generator": "Ninja",
+      "binaryDir": "build/release",
+      "cacheVariables": {
+        "SDKCONFIG": "build/release/sdkconfig",
+        "SDKCONFIG_DEFAULTS": "sdkconfig.defaults;sdkconfig.release.defaults"
+      }
+    }
+  ]
+}
