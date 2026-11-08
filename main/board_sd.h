@@ -1,6 +1,7 @@
 #pragma once
 
 #include <stddef.h>
+#include <stdint.h>
 
 #include "esp_err.h"
 
@@ -19,6 +20,11 @@
 
 /** @brief 挂载点。 */
 #define BOARD_SD_MOUNT_POINT "/sdcard"
+
+/** @brief SD 卡根目录参与翻页与浏览的帧文件数量和名称缓冲上限。 */
+inline constexpr int BOARD_SD_MAX_FRAMES = 32;
+inline constexpr size_t BOARD_SD_FRAME_NAME_BYTES = 96;
+using board_sd_frame_names = char[BOARD_SD_MAX_FRAMES][BOARD_SD_FRAME_NAME_BYTES];
 
 /** @brief 卡座里是否插着卡（读 CD 引脚，插卡为低）。 */
 bool board_sd_present();
@@ -79,6 +85,26 @@ int board_sd_frame_count(void);
  * @note 文件名超过 95 字节的会被跳过（FATFS 最长 255，但这里按 96 截）。
  */
 esp_err_t board_sd_frame_at(int index, char *path, size_t size);
+
+/**
+ * @brief 查询根目录帧文件名，按翻页顺序跳过坏帧头或截断的文件。
+ * @return ESP_OK 查询成功；ESP_ERR_INVALID_STATE 未挂载；ESP_FAIL 目录读取失败。
+ * @note 只检查帧头和声明长度，压缩流由预览端解码时验证。
+ */
+esp_err_t board_sd_browse_frames(board_sd_frame_names &names, int &count);
+
+/**
+ * @brief 打开用于 HTTP 预览的单个根目录帧，返回应发送的编码长度。
+ * @note 浏览接口由 HTTP 任务独占，未读完或断开连接也要调用 close。
+ *       若设备开始卸载，卸载方会关闭该文件，此后 read 返回错误。
+ */
+esp_err_t board_sd_browse_open(const char *name, size_t &size);
+
+/** @brief 从当前浏览文件顺序读取一块。调用方按 open 返回的总长分块读取。 */
+esp_err_t board_sd_browse_read(uint8_t *data, size_t size);
+
+/** @brief 释放浏览文件，已由卸载方关闭时可安全调用。 */
+void board_sd_browse_close();
 
 /**
  * @brief 读取 EPD1 原始帧或 EPD2 压缩帧，完整验证后画进 back buffer。

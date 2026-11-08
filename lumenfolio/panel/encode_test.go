@@ -138,3 +138,51 @@ func TestValidateFrameRejectsMalformedHeaders(t *testing.T) {
 		})
 	}
 }
+
+func TestDecodeFramePreservesInkAndPixelOrder(t *testing.T) {
+	raw := rawTestFrame()
+	copy(raw[12:], []byte{0x01, 0x23, 0x56})
+	raw[len(raw)-1] = 0x65
+	for _, frame := range [][]byte{raw, compressFrame(raw)} {
+		preview, err := DecodeFrame(frame)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if preview.Bounds() != image.Rect(0, 0, Width, Height) {
+			t.Fatalf("预览尺寸错误：%v", preview.Bounds())
+		}
+		for x, ink := range inks {
+			if got := preview.NRGBAAt(x, 0); got != ink.Preview {
+				t.Fatalf("%s 第 %d 列应是 %s，实际 %v", frame[:4], x, ink.Name, got)
+			}
+		}
+		if got := preview.NRGBAAt(Width-1, Height-1); got != inks[4].Preview {
+			t.Fatalf("%s 最后一个像素应为蓝色，实际 %v", frame[:4], got)
+		}
+	}
+}
+
+func TestDecodeFrameRejectsDamagedPayload(t *testing.T) {
+	raw := rawTestFrame()
+	compressed := compressFrame(raw)
+	badCRC := bytes.Clone(compressed)
+	badCRC[len(badCRC)-1] ^= 1
+	trailing := append(bytes.Clone(compressed), 0)
+	binary.LittleEndian.PutUint32(trailing[12:], uint32(len(trailing)-zlibHeaderBytes))
+	short := compressFrame(raw[:len(raw)-1])
+	long := compressFrame(append(raw, 0))
+	raw[12] = 0x04
+	for name, frame := range map[string][]byte{
+		"bad checksum": badCRC, "trailing zlib": trailing, "short pixels": short,
+		"long pixels": long, "unknown ink": raw,
+	} {
+		t.Run(name, func(t *testing.T) {
+			if err := ValidateFrame(frame); err != nil {
+				t.Fatalf("测试帧的帧头和长度应合法：%v", err)
+			}
+			if _, err := DecodeFrame(frame); err == nil {
+				t.Fatal("应拒绝损坏的帧")
+			}
+		})
+	}
+}

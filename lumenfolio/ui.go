@@ -128,6 +128,7 @@ type ui struct {
 	status    string
 	rendering bool // 当前构图和算法的六色预览正在计算
 	fileBusy  bool // 打开、上传和导出互斥，由 UI 事件循环维护
+	gallery   galleryBrowser
 
 	// 交互状态
 	canvasTag bool
@@ -179,12 +180,14 @@ func newUI(shaper *text.Shaper, initialFile string) *ui {
 		done:        make(chan ditherResult, 1),
 		ditherReq:   make(chan struct{}, 1),
 		jobResult:   make(chan string, 1),
+		gallery:     galleryBrowser{results: make(chan galleryResult, 1)},
 	}
 	ui.hostEditor.SingleLine = true
 	return ui
 }
 
 func (u *ui) run(w *app.Window) error {
+	defer u.gallery.cancelRequest()
 	u.window = w
 	u.explorer = explorer.NewExplorer(w)
 	if u.initialFile != "" {
@@ -310,6 +313,14 @@ func (u *ui) triggerDither() {
 
 func (u *ui) layout(gtx layout.Context) layout.Dimensions {
 	paint.Fill(gtx.Ops, bgColor)
+	select {
+	case result := <-u.gallery.results:
+		u.gallery.applyResult(result)
+	default:
+	}
+	if u.gallery.host != "" {
+		return u.galleryLayout(gtx)
+	}
 	return layout.Flex{Axis: layout.Horizontal}.Layout(gtx,
 		layout.Rigid(u.sidebar),
 		layout.Flexed(1, u.canvas),
@@ -339,6 +350,8 @@ func (u *ui) sidebar(gtx layout.Context) layout.Dimensions {
 			layout.Rigid(u.section("相框地址")),
 			layout.Rigid(gap(6)),
 			layout.Rigid(u.hostField),
+			layout.Rigid(gap(8)),
+			layout.Rigid(u.button("查看相框图片", &u.gallery.openButton, u.openGallery)),
 			layout.Rigid(gap(8)),
 			layout.Rigid(u.button("上传到相框", &u.uploadButton, u.onUpload)),
 			layout.Rigid(gap(8)),
@@ -849,25 +862,24 @@ func (u *ui) picture(gtx layout.Context) layout.Dimensions {
 			label.Alignment = text.Middle
 			return layout.Center.Layout(gtx, label.Layout)
 		}
-		max := gtx.Constraints.Max
-		width := max.X
-		height := width * panel.Height / panel.Width
-		if height > max.Y {
-			height = max.Y
-			width = height * panel.Width / panel.Height
-		}
-		imageOp := paint.NewImageOp(u.preview)
-		imageOp.Filter = paint.FilterNearest
-		return layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-			gtx.Constraints.Min = image.Point{X: width, Y: height}
-			gtx.Constraints.Max = gtx.Constraints.Min
-			frame := clip.Rect{Max: gtx.Constraints.Min}.Push(gtx.Ops)
-			paint.ColorOp{Color: frameColor}.Add(gtx.Ops)
-			paint.PaintOp{}.Add(gtx.Ops)
-			widget.Image{Src: imageOp, Fit: widget.Contain, Position: layout.Center}.Layout(gtx)
-			frame.Pop()
-			return layout.Dimensions{Size: gtx.Constraints.Min}
-		})
+		return framePicture(gtx, paint.NewImageOp(u.preview))
+	})
+}
+
+// framePicture 保持面板比例，用于本地取景结果和从相框读回的帧。
+func framePicture(gtx layout.Context, imageOp paint.ImageOp) layout.Dimensions {
+	max := gtx.Constraints.Max
+	width := max.X
+	height := width * panel.Height / panel.Width
+	if height > max.Y {
+		height = max.Y
+		width = height * panel.Width / panel.Height
+	}
+	imageOp.Filter = paint.FilterNearest
+	return layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+		gtx.Constraints = layout.Exact(image.Pt(width, height))
+		fill(gtx, frameColor)
+		return widget.Image{Src: imageOp, Fit: widget.Contain, Position: layout.Center}.Layout(gtx)
 	})
 }
 

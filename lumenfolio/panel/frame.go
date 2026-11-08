@@ -5,6 +5,9 @@ import (
 	"compress/zlib"
 	"encoding/binary"
 	"fmt"
+	"image"
+	"image/color"
+	"io"
 )
 
 const zlibHeaderBytes = 16
@@ -50,4 +53,43 @@ func ValidateFrame(frame []byte) error {
 		return fmt.Errorf("不是 EPD1／EPD2 帧")
 	}
 	return nil
+}
+
+// DecodeFrame 还原整幅 EPD1／EPD2 帧，以面板近似色生成只读预览，不重新抖动。
+// 压缩帧必须完整解压出一帧像素，且通过 zlib 校验；非六色墨水码视为损坏。
+func DecodeFrame(frame []byte) (*image.NRGBA, error) {
+	if err := ValidateFrame(frame); err != nil {
+		return nil, err
+	}
+	pixels := frame[12:]
+	if string(frame[:4]) == "EPD2" {
+		compressed := bytes.NewReader(frame[zlibHeaderBytes:])
+		reader, err := zlib.NewReader(compressed)
+		if err != nil {
+			return nil, fmt.Errorf("打开 EPD2 压缩流：%w", err)
+		}
+		defer reader.Close()
+		const pixelBytes = Width * Height / 2
+		pixels, err = io.ReadAll(io.LimitReader(reader, pixelBytes+1))
+		if err != nil {
+			return nil, fmt.Errorf("解压 EPD2：%w", err)
+		}
+		if len(pixels) != pixelBytes || compressed.Len() != 0 {
+			return nil, fmt.Errorf("EPD2 的像素长度或压缩流边界不符")
+		}
+	}
+
+	var palette [16]color.NRGBA
+	for _, ink := range inks {
+		palette[ink.Index&0xf] = ink.Preview
+	}
+	preview := image.NewNRGBA(image.Rect(0, 0, Width, Height))
+	for i, packed := range pixels {
+		hi, lo := palette[packed>>4], palette[packed&0xf]
+		if hi.A == 0 || lo.A == 0 {
+			return nil, fmt.Errorf("帧包含无效墨水码：0x%02x", packed)
+		}
+		copy(preview.Pix[i*8:], []byte{hi.R, hi.G, hi.B, hi.A, lo.R, lo.G, lo.B, lo.A})
+	}
+	return preview, nil
 }

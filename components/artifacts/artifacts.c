@@ -87,6 +87,38 @@ esp_err_t artifacts_draw_inbox_frame(void)
     return draw_frame(ARTIFACTS_INBOX_OFFSET, "上传的画面");
 }
 
+esp_err_t artifacts_frame_size(bool inbox, size_t *size)
+{
+    uint8_t header[EPD_FRAME_ZLIB_HEADER_BYTES];
+    esp_err_t err = artifacts_frame_read(inbox, 0, header, sizeof(header));
+    if (err != ESP_OK) {
+        return err;
+    }
+    epd_frame_info_t info;
+    if (epd_frame_parse_header(header, sizeof(header), &info) != ESP_OK) {
+        return ESP_ERR_NOT_FOUND;
+    }
+    *size = info.frame_bytes;
+    return ESP_OK;
+}
+
+esp_err_t artifacts_frame_read(bool inbox, size_t offset, uint8_t *data, size_t size)
+{
+    const esp_partition_t *part = artifacts_partition();
+    const size_t base = inbox ? ARTIFACTS_INBOX_OFFSET : ARTIFACTS_BOOT_OFFSET;
+    if (part == NULL || base > part->size || ARTIFACTS_SLOT_BYTES > part->size - base) {
+        return ESP_ERR_NOT_FOUND;
+    }
+    if (offset > ARTIFACTS_FRAME_BYTES || size > ARTIFACTS_FRAME_BYTES - offset) {
+        return ESP_ERR_INVALID_SIZE;
+    }
+    SemaphoreHandle_t mutex = artifacts_mutex();
+    xSemaphoreTake(mutex, portMAX_DELAY);
+    const esp_err_t err = esp_partition_read(part, base + offset, data, size);
+    xSemaphoreGive(mutex);
+    return err;
+}
+
 esp_err_t artifacts_inbox_begin(void)
 {
     const esp_partition_t *part = artifacts_partition();

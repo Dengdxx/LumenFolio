@@ -52,13 +52,16 @@ void app_hold_awake(void);
 void app_describe(char *buf, size_t size);
 
 /**
- * @brief 记下一次传图开始，电源守护在这次传输结束前不进入深度睡眠。
+ * @brief 记下画面上传、浏览或预览开始，电源守护在请求结束前不自动深睡。
  *
  * @note 只置标志。传输在 HTTP 任务里进行，睡眠由另一个任务判断，两边只读写这一个标志。
  */
-void app_inbox_begin(void);
+void app_frame_transfer_begin(void);
 
 /**
- * @brief 传图结束，恢复空闲计时。无论写入成功还是失败都要调用。
+ * @brief 画面请求结束，恢复空闲计时。无论成功还是失败都要调用。
  */
-void app_inbox_end(void);
+void app_frame_transfer_end(void);
+
+/** @brief HTTP 服务启动后注册设备画面列表和预览接口。 */
+esp_err_t app_register_frame_browse(void);

@@ -1,5 +1,6 @@
 package org.lumenfolio.android
 
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
@@ -43,10 +44,12 @@ import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -73,10 +76,16 @@ internal fun FrameUploadScreen(model: FrameUploadViewModel) {
         uri?.let(model::exportPicture)
     }
 
+    var showingDevicePictures by rememberSaveable { mutableStateOf(false) }
     val editorScroll = rememberScrollState()
+    BackHandler(enabled = showingDevicePictures) { showingDevicePictures = false }
 
     Scaffold(
-        topBar = { LumenFolioTopBar() },
+        topBar = {
+            LumenFolioTopBar(showingDevicePictures, !model.busy) {
+                showingDevicePictures = !showingDevicePictures
+            }
+        },
     ) { insets ->
         val contentModifier = Modifier
             .fillMaxSize()
@@ -84,25 +93,34 @@ internal fun FrameUploadScreen(model: FrameUploadViewModel) {
             .consumeWindowInsets(insets)
             .imePadding()
 
-        Box(
-            modifier = contentModifier
-                .verticalScroll(editorScroll)
-                .padding(horizontal = 16.dp, vertical = 20.dp),
-            contentAlignment = Alignment.TopCenter,
-        ) {
-            Column(
-                modifier = Modifier.widthIn(max = 560.dp).fillMaxWidth(),
-                verticalArrangement = Arrangement.spacedBy(16.dp),
+        if (showingDevicePictures) {
+            DevicePicturesScreen(
+                address = model.address,
+                onAddressChange = model::editAddress,
+                onConnected = model::rememberAddress,
+                modifier = contentModifier,
+            )
+        } else {
+            Box(
+                modifier = contentModifier
+                    .verticalScroll(editorScroll)
+                    .padding(horizontal = 16.dp, vertical = 20.dp),
+                contentAlignment = Alignment.TopCenter,
             ) {
-                PicturePanel(model) { openImage.launch(arrayOf("image/png", "image/jpeg")) }
-                FrameUploadPanel(model) { export.launch("frame.bin") }
+                Column(
+                    modifier = Modifier.widthIn(max = 560.dp).fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(16.dp),
+                ) {
+                    PicturePanel(model) { openImage.launch(arrayOf("image/png", "image/jpeg")) }
+                    FrameUploadPanel(model) { export.launch("frame.bin") }
+                }
             }
         }
     }
 }
 
 @Composable
-private fun LumenFolioTopBar() {
+private fun LumenFolioTopBar(showingDevicePictures: Boolean, enabled: Boolean, onSwitch: () -> Unit) {
     val colors = MaterialTheme.colorScheme
     Surface(color = colors.surface) {
         Column {
@@ -126,6 +144,9 @@ private fun LumenFolioTopBar() {
                     Box(Modifier.size(11.dp, 14.dp).border(1.5.dp, colors.primary, RoundedCornerShape(2.dp)))
                 }
                 Text("LumenFolio", Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
+                TextButton(onClick = onSwitch, enabled = enabled) {
+                    Text(if (showingDevicePictures) "返回取景" else "相框图片")
+                }
             }
             HorizontalDivider(color = colors.outlineVariant)
         }
@@ -310,7 +331,7 @@ private fun FrameUploadPanel(model: FrameUploadViewModel, onExport: () -> Unit) 
 }
 
 @Composable
-private fun FrameAddressField(address: String, onAddressChange: (String) -> Unit, enabled: Boolean) {
+internal fun FrameAddressField(address: String, onAddressChange: (String) -> Unit, enabled: Boolean = true) {
     val colors = MaterialTheme.colorScheme
     OutlinedTextField(
         value = address,

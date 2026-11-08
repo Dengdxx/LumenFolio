@@ -115,9 +115,13 @@ type Rendered struct {
 
 // Preview 返回可由 Android 解码的全分辨率 PNG。
 func (r *Rendered) Preview() ([]byte, error) {
+	return encodePreview(r.pixels)
+}
+
+func encodePreview(pixels *image.NRGBA) ([]byte, error) {
 	var output bytes.Buffer
 	encoder := png.Encoder{CompressionLevel: png.BestSpeed}
-	if err := encoder.Encode(&output, r.pixels); err != nil {
+	if err := encoder.Encode(&output, pixels); err != nil {
 		return nil, err
 	}
 	return output.Bytes(), nil

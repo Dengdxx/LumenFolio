@@ -61,7 +61,7 @@ int s_frame_count;                 // 卡上帧文件数量，显示任务每次
 int64_t s_idle_since_us;           // 上一次有命令的时刻
 volatile bool s_sleep_requested;   // 控制台要求立刻睡
 volatile bool s_sleep_hold;        // 本次开机不自动睡（台面调试用）
-volatile bool s_inbox_busy;        // 正在接收一张图，这段时间不自动睡
+volatile bool s_frame_transfer_busy; // 正在处理画面请求，这段时间不自动睡
 
 const char *display_state_name()
 {
@@ -207,7 +207,7 @@ void power_guard_task(void *)
         }
         // 带 VBUS 的线由 s_plugged 拦住。再看枚举，只为不供电的烧录线：它只有
         // D+/D-，TP4056 一直报未接充电。这是台面特例，一般不会遇到。
-        if (s_sleep_hold || s_plugged || s_inbox_busy || usb_serial_jtag_is_connected() ||
+        if (s_sleep_hold || s_plugged || s_frame_transfer_busy || usb_serial_jtag_is_connected() ||
             s_display_state == display_state::busy) {
             continue;
         }
@@ -362,7 +362,7 @@ esp_err_t handle_frame_upload(httpd_req_t *request)
         return httpd_resp_sendstr(request, "需要 application/octet-stream\n");
     }
 
-    app_inbox_begin();
+    app_frame_transfer_begin();
     esp_err_t result = ESP_OK;
     uint8_t header[EPD_FRAME_ZLIB_HEADER_BYTES];
     size_t got = 0;
@@ -415,7 +415,7 @@ esp_err_t handle_frame_upload(httpd_req_t *request)
     if (result != ESP_OK && writing) {
         artifacts_inbox_discard();
     }
-    app_inbox_end();
+    app_frame_transfer_end();
 
     if (result != ESP_OK) {
         httpd_resp_set_status(request, result == ESP_ERR_NOT_FOUND || result == ESP_ERR_INVALID_SIZE
@@ -602,15 +602,15 @@ void app_hold_awake()
     s_sleep_hold = true;
 }
 
-void app_inbox_begin()
+void app_frame_transfer_begin()
 {
-    s_inbox_busy = true;
+    s_frame_transfer_busy = true;
 }
 
-void app_inbox_end()
+void app_frame_transfer_end()
 {
-    s_inbox_busy = false;
     s_idle_since_us = esp_timer_get_time();
+    s_frame_transfer_busy = false;
 }
 
 void app_describe(char *buf, size_t size)
@@ -724,6 +724,10 @@ extern "C" void app_main(void)
         ESP_ERROR_CHECK(otaServiceStart());
         register_console_route();
         register_frame_route();
+        const esp_err_t browse = app_register_frame_browse();
+        if (browse != ESP_OK) {
+            ESP_LOGE(kTag, "画面浏览接口注册失败：%s", esp_err_to_name(browse));
+        }
     } else {
         ESP_LOGE(kTag, "Wi-Fi 未启动：%s，本次开机无法 OTA", esp_err_to_name(wifi));
     }

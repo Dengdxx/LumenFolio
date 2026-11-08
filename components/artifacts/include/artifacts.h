@@ -33,6 +33,20 @@ esp_err_t artifacts_draw_boot_frame(void);
 esp_err_t artifacts_draw_inbox_frame(void);
 
 /**
+ * @brief 从指定槽的帧头读取编码长度，空槽或坏帧头返回 ESP_ERR_NOT_FOUND。
+ * @param inbox true 选上传槽，false 选开机画面槽。
+ * @param[out] size 帧头声明的整帧字节数，不含槽尾空间。
+ */
+esp_err_t artifacts_frame_size(bool inbox, size_t *size);
+
+/**
+ * @brief 读取指定槽的一段编码数据，不占用显示缓冲。
+ * @note 调用方须先读取长度并以此限制偏移与长度。读取和上传都在同一个 HTTP
+ *       任务内串行执行，才能保证多段读取之间槽位不被覆盖。
+ */
+esp_err_t artifacts_frame_read(bool inbox, size_t offset, uint8_t *data, size_t size);
+
+/**
  * @brief 擦除上传槽，准备按偏移流式写入；不触碰开机画面。
  * @return ESP_OK 成功；其余为分区或擦除错误。
  * @note 接收块使用内部 RAM；读取、擦除与写入在组件内互斥，避免读取到覆盖中的帧。

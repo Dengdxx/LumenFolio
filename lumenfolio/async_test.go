@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"image"
 	"image/color"
 	"image/png"
@@ -9,6 +10,7 @@ import (
 	"testing"
 	"testing/synctest"
 
+	"lumenfolio/gallery"
 	"lumenfolio/panel"
 )
 
@@ -137,6 +139,42 @@ func TestDitherDeliversNewestResult(t *testing.T) {
 		case <-window.wake:
 		default:
 			t.Fatal("最新结果交付后应再次唤醒窗口")
+		}
+	})
+}
+
+func TestGalleryDiscardsQueuedResultOnSourceSwitch(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		u := newTestUI()
+		window := &waitingWindow{wake: make(chan struct{}, 1)}
+		u.window = window
+		u.startGalleryRequest(func(context.Context) galleryResult {
+			return galleryResult{pictures: []gallery.Picture{{ID: "boot"}}}
+		})
+		synctest.Wait()
+		select {
+		case <-window.wake:
+		default:
+			t.Fatal("Flash 列表入队后应唤醒窗口")
+		}
+
+		// 切换来源时，Flash 的结果已入队但尚未被窗口取走。
+		u.startGalleryRequest(func(context.Context) galleryResult {
+			return galleryResult{pictures: []gallery.Picture{{ID: "1.bin"}}}
+		})
+		u.gallery.applyResult(<-u.gallery.results)
+		if len(u.gallery.pictures) != 0 {
+			t.Fatal("切换到 SD 卡后不应显示旧的 Flash 列表")
+		}
+		synctest.Wait()
+		select {
+		case <-window.wake:
+		default:
+			t.Fatal("SD 卡列表入队后应再次唤醒窗口")
+		}
+		u.gallery.applyResult(<-u.gallery.results)
+		if got := u.gallery.pictures; len(got) != 1 || got[0].ID != "1.bin" {
+			t.Fatalf("应显示当前来源的 SD 卡列表，实际为 %v", got)
 		}
 	})
 }

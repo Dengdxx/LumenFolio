@@ -142,7 +142,8 @@ internal class FrameUploadViewModel(application: Application) : AndroidViewModel
         reply = null
     }
 
-    private fun rememberAddress(host: String) {
+    /** 上传和浏览使用同一个最近连接成功的相框地址。 */
+    fun rememberAddress(host: String) {
         preferences.edit().putString("frame_address", host).apply()
     }
 
