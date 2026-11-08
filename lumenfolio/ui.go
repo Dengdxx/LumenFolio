@@ -417,9 +417,16 @@ func (u *ui) button(label string, clickable *widget.Clickable, action func()) la
 
 func (u *ui) algorithmList(gtx layout.Context) layout.Dimensions {
 	algs := panel.Algorithms()
-	return u.algList.Layout(gtx, len(algs), func(gtx layout.Context, index int) layout.Dimensions {
+	// Gio 的 List 会在父级原点注册滚动区域。侧栏从窗口左上角开始，
+	// 不先裁剪就会盖住列表上方的按钮。
+	macro := op.Record(gtx.Ops)
+	dims := u.algList.Layout(gtx, len(algs), func(gtx layout.Context, index int) layout.Dimensions {
 		return u.algorithm(index, algs[index].Name())(gtx)
 	})
+	call := macro.Stop()
+	defer clip.Rect(image.Rectangle{Max: dims.Size}).Push(gtx.Ops).Pop()
+	call.Add(gtx.Ops)
+	return dims
 }
 
 func (u *ui) algorithm(index int, name string) layout.Widget {
@@ -501,6 +508,8 @@ func (u *ui) swatch(ink panel.Ink) layout.Widget {
 }
 
 func (u *ui) canvas(gtx layout.Context) layout.Dimensions {
+	// 指针区域必须落在真正的画布上。Flex 子项在父级原点展开，
+	// 若在 canvas 上注册，会从窗口左上角盖住侧栏按钮。
 	return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
 		layout.Rigid(u.canvasHeader),
 		layout.Flexed(1, u.canvasBody),
@@ -600,17 +609,26 @@ func (u *ui) tabButton(label string, clickable *widget.Clickable, active bool, a
 }
 
 func (u *ui) canvasBody(gtx layout.Context) layout.Dimensions {
-	if u.rawImage == nil {
-		message := "还没有图片，点击左侧「打开图片」"
-		label := material.H6(u.theme, message)
-		label.Color = mutedColor
-		label.Alignment = text.Middle
-		return layout.Center.Layout(gtx, label.Layout)
-	}
-	if u.mode == modeCrop {
-		return u.cropView(gtx)
-	}
-	return u.picture(gtx)
+	return u.canvasArea(gtx, func(gtx layout.Context) layout.Dimensions {
+		if u.rawImage == nil {
+			message := "还没有图片，点击左侧「打开图片」"
+			label := material.H6(u.theme, message)
+			label.Color = mutedColor
+			label.Alignment = text.Middle
+			return layout.Center.Layout(gtx, label.Layout)
+		}
+		if u.mode == modeCrop {
+			return u.cropView(gtx)
+		}
+		return u.picture(gtx)
+	})
+}
+
+// canvasArea 把指针事件限制在画布内容区，避免盖住左侧控件。
+func (u *ui) canvasArea(gtx layout.Context, content layout.Widget) layout.Dimensions {
+	defer clip.Rect(image.Rectangle{Max: gtx.Constraints.Max}).Push(gtx.Ops).Pop()
+	event.Op(gtx.Ops, &u.canvasTag)
+	return content(gtx)
 }
 
 // cropView 固定在中央显示 1200:1600 取景框。
@@ -629,10 +647,7 @@ func (u *ui) cropView(gtx layout.Context) layout.Dimensions {
 	topCenter := f32.Pt(float32(fc.X), float32(frameRect.Min.Y))
 	handlePos := topCenter.Sub(f32.Pt(0, float32(gtx.Dp(unit.Dp(24)))))
 
-	// 2. 注册交互区域与指针事件处理
-	defer clip.Rect(viewRect).Push(gtx.Ops).Pop()
-	event.Op(gtx.Ops, &u.canvasTag)
-
+	// 2. 指针区域由 canvasArea 限定在画布内，这里只消费事件。
 	filter := pointer.Filter{
 		Target:  &u.canvasTag,
 		Kinds:   pointer.Press | pointer.Drag | pointer.Release | pointer.Scroll | pointer.Cancel,

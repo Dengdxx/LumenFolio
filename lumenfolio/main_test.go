@@ -50,7 +50,7 @@ func TestCropPointerGestures(t *testing.T) {
 			gtx := layout.Context{Ops: &ops, Source: r.Source(), Metric: unit.Metric{PxPerDp: 1, PxPerSp: 1}, Constraints: layout.Exact(image.Pt(600, 600))}
 			frame := func() {
 				ops.Reset()
-				u.cropView(gtx)
+				u.canvasArea(gtx, u.cropView)
 				r.Frame(&ops)
 			}
 			frame()
@@ -143,5 +143,35 @@ func TestModeTabsRespondToPointer(t *testing.T) {
 				t.Fatal("切换模式后应安排重绘，及时更新标签的选中样式")
 			}
 		})
+	}
+}
+
+func TestOpenButtonReceivesClickInPreview(t *testing.T) {
+	u := newTestUI()
+	u.rawImage = image.NewNRGBA(image.Rect(0, 0, 120, 160))
+	u.mode = modePreview
+	var opened int
+	u.openResult = make(chan openResult, 1)
+	var r input.Router
+	var ops op.Ops
+	gtx := layout.Context{Ops: &ops, Source: r.Source(), Metric: unit.Metric{PxPerDp: 1, PxPerSp: 1}, Constraints: layout.Exact(image.Pt(1180, 760))}
+	frame := func() {
+		ops.Reset()
+		u.layout(gtx)
+		r.Frame(&ops)
+	}
+	frame()
+	r.Queue(
+		pointer.Event{Kind: pointer.Press, Source: pointer.Mouse, Buttons: pointer.ButtonPrimary, Position: f32.Pt(124, 80)},
+		pointer.Event{Kind: pointer.Release, Source: pointer.Mouse, Position: f32.Pt(124, 80)},
+	)
+	frame()
+	select {
+	case <-u.openResult:
+		opened++
+	default:
+	}
+	if opened != 1 {
+		t.Fatalf("预览界面中打开按钮应收到 1 次点击，实际 %d", opened)
 	}
 }
