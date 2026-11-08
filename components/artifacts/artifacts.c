@@ -51,11 +51,9 @@ static esp_err_t read_frame(void *context, size_t offset, uint8_t *data, size_t 
 }
 
 /**
- * @brief 从固定槽读取 EPD1／EPD2，完整验证后画进 back。
- * @note 只在显示任务里调用。front 暂存行优先像素，back 暂存压缩输入；失败时两者不可上屏。
- *       帧头与全部载荷在同一读锁内读取，避免下一次覆盖擦除与本次读取交错。
+ * @brief 帧头和载荷在同一读锁内读取，避免槽位覆盖与解码交错。
  */
-static esp_err_t draw_frame(size_t offset, const char *what)
+static esp_err_t decode_slot(size_t offset, uint8_t *pixels, uint8_t *compressed)
 {
     const esp_partition_t *part = artifacts_partition();
     if (part == NULL) {
@@ -64,17 +62,29 @@ static esp_err_t draw_frame(size_t offset, const char *what)
     if (offset > part->size || ARTIFACTS_SLOT_BYTES > part->size - offset) {
         return ESP_ERR_INVALID_SIZE;
     }
+    partition_reader_t reader = {.part = part, .base = offset};
+    SemaphoreHandle_t mutex = artifacts_mutex();
+    xSemaphoreTake(mutex, portMAX_DELAY);
+    const esp_err_t err = epd_frame_decode(read_frame, &reader, ARTIFACTS_SLOT_BYTES,
+                                          pixels, compressed);
+    xSemaphoreGive(mutex);
+    return err;
+}
+
+esp_err_t artifacts_decode_frame(bool inbox, uint8_t *pixels, uint8_t *compressed)
+{
+    return decode_slot(inbox ? ARTIFACTS_INBOX_OFFSET : ARTIFACTS_BOOT_OFFSET, pixels, compressed);
+}
+
+/** @brief 显示任务借用 front 和 back 解码，只有完整帧才画入 back。 */
+static esp_err_t draw_frame(size_t offset, const char *what)
+{
     uint8_t *back = epd_fb_back();
     if (back == NULL) {
         return ESP_ERR_INVALID_STATE;
     }
     uint8_t *scratch = (uint8_t *)epd_fb_front();
-    partition_reader_t reader = {.part = part, .base = offset};
-    SemaphoreHandle_t mutex = artifacts_mutex();
-    xSemaphoreTake(mutex, portMAX_DELAY);
-    const esp_err_t err = epd_frame_decode(read_frame, &reader, ARTIFACTS_SLOT_BYTES,
-                                          scratch, back);
-    xSemaphoreGive(mutex);
+    const esp_err_t err = decode_slot(offset, scratch, back);
     if (err != ESP_OK) {
         ESP_LOGW(TAG, "读取%s失败：%s", what, esp_err_to_name(err));
         return err;

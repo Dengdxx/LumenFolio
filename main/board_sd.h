@@ -114,6 +114,12 @@ esp_err_t board_sd_browse_read(uint8_t *data, size_t size);
 void board_sd_browse_close();
 
 /**
+ * @brief 独立打开根目录帧并解码到调用方工作区，避免与浏览文件共享读位置。
+ * @note 两块工作区均至少为 EPD_FRAME_PIXEL_BYTES 字节；读取期间持有 SD 锁。
+ */
+esp_err_t board_sd_decode_frame(const char *name, uint8_t *pixels, uint8_t *compressed);
+
+/**
  * @brief 读取 EPD1 原始帧或 EPD2 压缩帧，完整验证后画进 back buffer。
  *
  * @param path board_sd_frame_at() 给出的完整路径。

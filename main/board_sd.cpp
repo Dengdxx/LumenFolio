@@ -326,6 +326,25 @@ esp_err_t board_sd_browse_read(uint8_t *data, size_t size)
     return fread(data, 1, size, s_browse_file) == size ? ESP_OK : ESP_FAIL;
 }
 
+esp_err_t board_sd_decode_frame(const char *name, uint8_t *pixels, uint8_t *compressed)
+{
+    if (!is_frame_name(name)) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    std::lock_guard lock(s_sd_mutex);
+    if (s_card == nullptr) {
+        return ESP_ERR_NOT_FOUND;
+    }
+    size_t size;
+    FILE *file = open_browse_frame(name, size);
+    if (file == nullptr) {
+        return ESP_ERR_NOT_FOUND;
+    }
+    const esp_err_t err = epd_frame_decode(read_frame_file, file, size, pixels, compressed);
+    fclose(file);
+    return err;
+}
+
 void board_sd_browse_close()
 {
     std::lock_guard lock(s_sd_mutex);

@@ -6,6 +6,10 @@
 
 #include "artifacts.h"
 #include "board_sd.h"
+#include "esp_heap_caps.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/queue.h"
+#include "freertos/task.h"
 #include "ota_service.h"
 
 namespace {
@@ -38,6 +42,66 @@ const frame_slot *find_slot(const char *id)
         }
     }
     return nullptr;
+}
+
+struct frame_reader {
+    frame_source source;
+    size_t size;
+    bool inbox;
+};
+
+/** @brief 查询帧头及编码长度。SD 成功时由 HTTP handler 负责关闭已打开的文件。 */
+esp_err_t open_frame(frame_reader &reader, const char *id)
+{
+    if (reader.source == frame_source::sd) {
+        return board_sd_browse_open(id, reader.size);
+    }
+    const auto *slot = find_slot(id);
+    if (slot == nullptr) {
+        return ESP_ERR_NOT_FOUND;
+    }
+    reader.inbox = slot->inbox;
+    return artifacts_frame_size(reader.inbox, &reader.size);
+}
+
+constexpr size_t kThumbScale = 10;
+constexpr size_t kThumbWidth = EPD_FRAME_WIDTH / kThumbScale;
+constexpr size_t kThumbHeight = EPD_FRAME_HEIGHT / kThumbScale;
+constexpr size_t kThumbBytes = kThumbWidth * kThumbHeight * 2;
+
+/** @brief 将每块 10×10 的墨水近似色平均，保留抖动混色，输出行优先小端 RGB565。 */
+bool make_thumbnail(const uint8_t *frame, uint8_t *out)
+{
+    // 与 app/pc/panel/panel.go 的 Preview 颜色一致，未使用的色码留零。
+    constexpr uint8_t inks[16][3] = {
+        {20, 20, 20}, {245, 245, 240}, {240, 200, 30}, {190, 30, 40}, {}, {25, 70, 170}, {30, 140, 60},
+    };
+    constexpr unsigned area = kThumbScale * kThumbScale;
+    for (size_t y = 0; y < kThumbHeight; ++y) {
+        for (size_t x = 0; x < kThumbWidth; ++x) {
+            unsigned red = 0, green = 0, blue = 0;
+            for (size_t row = 0; row < kThumbScale; ++row) {
+                const uint8_t *pixels = frame + ((y * kThumbScale + row) * EPD_FRAME_WIDTH + x * kThumbScale) / 2;
+                for (size_t i = 0; i < kThumbScale / 2; ++i) {
+                    const auto &hi = inks[pixels[i] >> 4];
+                    const auto &lo = inks[pixels[i] & 0xf];
+                    if (hi[0] == 0 || lo[0] == 0) {
+                        return false;
+                    }
+                    red += hi[0] + lo[0];
+                    green += hi[1] + lo[1];
+                    blue += hi[2] + lo[2];
+                }
+            }
+            const unsigned r = (red + area / 2) / area;
+            const unsigned g = (green + area / 2) / area;
+            const unsigned b = (blue + area / 2) / area;
+            const uint16_t rgb = ((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3);
+            *out++ = static_cast<uint8_t>(rgb);
+            *out++ = static_cast<uint8_t>(rgb >> 8);
+        }
+    }
+    return true;
 }
 
 int hex_digit(char ch)
@@ -213,19 +277,9 @@ esp_err_t handle_frame_download(httpd_req_t *request)
         return httpd_resp_send_err(request, HTTPD_400_BAD_REQUEST, "需要有效的 source 和 id");
     }
     const FrameTransfer transfer;
-    size_t size = 0;
-    bool inbox = false;
+    frame_reader reader{source, 0, false};
     const bool from_sd = source == frame_source::sd;
-    esp_err_t err = ESP_ERR_NOT_FOUND;
-    if (from_sd) {
-        err = board_sd_browse_open(id, size);
-    } else {
-        const auto *slot = find_slot(id);
-        if (slot != nullptr) {
-            inbox = slot->inbox;
-            err = artifacts_frame_size(inbox, &size);
-        }
-    }
+    esp_err_t err = open_frame(reader, id);
     if (err == ESP_ERR_NOT_FOUND || err == ESP_ERR_INVALID_ARG) {
         return httpd_resp_send_err(request, HTTPD_404_NOT_FOUND, "画面不存在");
     }
@@ -235,11 +289,11 @@ esp_err_t handle_frame_download(httpd_req_t *request)
 
     httpd_resp_set_type(request, "application/octet-stream");
     httpd_resp_set_hdr(request, "Cache-Control", "no-store");
-    for (size_t offset = 0; offset < size;) {
-        const size_t remaining = size - offset;
+    for (size_t offset = 0; offset < reader.size;) {
+        const size_t remaining = reader.size - offset;
         const size_t count = remaining < sizeof(s_chunk) ? remaining : sizeof(s_chunk);
         err = from_sd ? board_sd_browse_read(s_chunk, count)
-                      : artifacts_frame_read(inbox, offset, s_chunk, count);
+                      : artifacts_frame_read(reader.inbox, offset, s_chunk, count);
         if (err != ESP_OK ||
             httpd_resp_send_chunk(request, reinterpret_cast<const char *>(s_chunk), count) != ESP_OK) {
             err = ESP_FAIL;
@@ -251,6 +305,108 @@ esp_err_t handle_frame_download(httpd_req_t *request)
     return err == ESP_OK ? httpd_resp_send_chunk(request, nullptr, 0) : ESP_FAIL;
 }
 
+/** @brief HTTP 任务复制请求，入队后把连接交给缩略图任务。 */
+struct thumbnail_request {
+    httpd_req_t *http;
+    frame_source source;
+    char id[BOARD_SD_FRAME_NAME_BYTES];
+};
+
+QueueHandle_t s_thumb_queue;
+
+/** @brief 读取完整帧并发送小图，文件和 PSRAM 工作区不与其他请求共享。 */
+void send_thumbnail(const thumbnail_request &job)
+{
+    const bool from_sd = job.source == frame_source::sd;
+    const auto *slot = from_sd ? nullptr : find_slot(job.id);
+    if (!from_sd && slot == nullptr) {
+        httpd_resp_send_err(job.http, HTTPD_404_NOT_FOUND, "画面不存在");
+        return;
+    }
+
+    auto *pixels = static_cast<uint8_t *>(heap_caps_malloc(2 * EPD_FRAME_PIXEL_BYTES, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+    if (pixels == nullptr) {
+        httpd_resp_set_status(job.http, "503 Service Unavailable");
+        httpd_resp_sendstr(job.http, "缩略图工作区不足\n");
+        return;
+    }
+    uint8_t *scratch = pixels + EPD_FRAME_PIXEL_BYTES;
+    const esp_err_t err = from_sd ? board_sd_decode_frame(job.id, pixels, scratch)
+                                  : artifacts_decode_frame(slot->inbox, pixels, scratch);
+
+    // 解压完成后压缩输入已用完，将工作区复用为 RGB565 响应。
+    if (err == ESP_ERR_NO_MEM) {
+        httpd_resp_set_status(job.http, "503 Service Unavailable");
+        httpd_resp_sendstr(job.http, "缩略图工作区不足\n");
+    } else if (err == ESP_ERR_NOT_FOUND || err == ESP_ERR_INVALID_ARG) {
+        httpd_resp_send_err(job.http, HTTPD_404_NOT_FOUND, "画面不存在");
+    } else if (err != ESP_OK || !make_thumbnail(pixels, scratch)) {
+        httpd_resp_send_err(job.http, HTTPD_500_INTERNAL_SERVER_ERROR, "无法生成缩略图");
+    } else {
+        httpd_resp_set_type(job.http, "application/octet-stream");
+        httpd_resp_set_hdr(job.http, "Cache-Control", "no-store");
+        httpd_resp_send(job.http, reinterpret_cast<const char *>(scratch), kThumbBytes);
+    }
+    heap_caps_free(pixels);
+}
+
+/** @brief 串行处理缩略图；响应成功或失败都必须归还 HTTP 连接。 */
+void thumbnail_task(void *arg)
+{
+    auto queue = static_cast<QueueHandle_t>(arg);
+    for (;;) {
+        thumbnail_request job;
+        xQueueReceive(queue, &job, portMAX_DELAY);
+        send_thumbnail(job);
+        httpd_req_async_handler_complete(job.http);
+    }
+}
+
+/** @brief 由 HTTP 任务按需启动。同核低优先级，OTA 写 Flash 可先于 PSRAM 解码执行。 */
+bool start_thumbnail_task()
+{
+    if (s_thumb_queue != nullptr) return true;
+    s_thumb_queue = xQueueCreate(1, sizeof(thumbnail_request));
+    if (s_thumb_queue == nullptr) return false;
+    if (xTaskCreatePinnedToCore(thumbnail_task, "frame_thumb", 4096, s_thumb_queue, 1, nullptr, xPortGetCoreID()) != pdPASS) {
+        vQueueDelete(s_thumb_queue);
+        s_thumb_queue = nullptr;
+        return false;
+    }
+    return true;
+}
+
+/** @brief GET /frame/thumb 移交连接并立即返回 HTTP 任务，最多等待一项。 */
+esp_err_t handle_frame_thumbnail(httpd_req_t *request)
+{
+    encoded_id id;
+    const frame_source source = parse_query(request, &id);
+    if (source == frame_source::invalid) {
+        return httpd_resp_send_err(request, HTTPD_400_BAD_REQUEST, "需要有效的 source 和 id");
+    }
+    thumbnail_request job{nullptr, source, {}};
+    if (strlen(id) >= sizeof(job.id)) {
+        return httpd_resp_send_err(request, HTTPD_404_NOT_FOUND, "画面不存在");
+    }
+    strcpy(job.id, id);
+    const FrameTransfer transfer;
+    if (!start_thumbnail_task()) {
+        httpd_resp_set_status(request, "503 Service Unavailable");
+        return httpd_resp_sendstr(request, "缩略图任务暂不可用\n");
+    }
+    if (uxQueueSpacesAvailable(s_thumb_queue) == 0) {
+        httpd_resp_set_status(request, "429 Too Many Requests");
+        return httpd_resp_sendstr(request, "缩略图队列已满\n");
+    }
+    if (httpd_req_async_handler_begin(request, &job.http) != ESP_OK) {
+        httpd_resp_set_status(request, "503 Service Unavailable");
+        return httpd_resp_sendstr(request, "缩略图请求暂不可用\n");
+    }
+    // HTTP 任务是唯一生产者，检查到的空位在入队前只会增加。
+    xQueueSend(s_thumb_queue, &job, 0);
+    return ESP_OK;
+}
+
 /** @brief POST /frame/display 验证选中来源并排队，由显示任务读取原件和刷屏。 */
 esp_err_t handle_frame_display(httpd_req_t *request)
 {
@@ -260,19 +416,9 @@ esp_err_t handle_frame_display(httpd_req_t *request)
         return httpd_resp_send_err(request, HTTPD_400_BAD_REQUEST, "需要有效的 source 和 id，且请求体须为空");
     }
     const FrameTransfer transfer;
-    size_t size;
-    esp_err_t err = ESP_ERR_NOT_FOUND;
-    display_cmd cmd = display_cmd::pick_sd;
-    if (source == frame_source::sd) {
-        err = board_sd_browse_open(id, size);
-        if (err == ESP_OK) board_sd_browse_close();
-    } else {
-        const auto *slot = find_slot(id);
-        if (slot != nullptr) {
-            cmd = slot->inbox ? display_cmd::pick_inbox : display_cmd::pick_boot;
-            err = artifacts_frame_size(slot->inbox, &size);
-        }
-    }
+    frame_reader reader{source, 0, false};
+    const esp_err_t err = open_frame(reader, id);
+    if (source == frame_source::sd && err == ESP_OK) board_sd_browse_close();
     if (err == ESP_ERR_INVALID_ARG) {
         return httpd_resp_send_err(request, HTTPD_400_BAD_REQUEST, "帧文件名非法");
     }
@@ -282,6 +428,8 @@ esp_err_t handle_frame_display(httpd_req_t *request)
     if (err != ESP_OK) {
         return httpd_resp_send_err(request, HTTPD_500_INTERNAL_SERVER_ERROR, "无法读取画面");
     }
+    const display_cmd cmd = source == frame_source::sd ? display_cmd::pick_sd
+                          : reader.inbox ? display_cmd::pick_inbox : display_cmd::pick_boot;
     httpd_resp_set_type(request, "text/plain; charset=utf-8");
     if (app_post_display(cmd, id) != ESP_OK) {
         httpd_resp_set_status(request, "503 Service Unavailable");
@@ -299,6 +447,7 @@ esp_err_t app_register_frame_browse()
         {.uri = "/frames", .method = HTTP_GET, .handler = handle_frame_list, .user_ctx = nullptr},
         {.uri = "/frames/storage", .method = HTTP_GET, .handler = handle_frame_storage, .user_ctx = nullptr},
         {.uri = "/frame", .method = HTTP_GET, .handler = handle_frame_download, .user_ctx = nullptr},
+        {.uri = "/frame/thumb", .method = HTTP_GET, .handler = handle_frame_thumbnail, .user_ctx = nullptr},
         {.uri = "/frame/display", .method = HTTP_POST, .handler = handle_frame_display, .user_ctx = nullptr},
     };
     for (const auto &route : routes) {

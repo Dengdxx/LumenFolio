@@ -36,6 +36,12 @@ esp_err_t artifacts_draw_boot_frame(void);
 esp_err_t artifacts_draw_inbox_frame(void);
 
 /**
+ * @brief 将槽内帧解码到调用方的独占工作区，读取期间锁住该槽。
+ * @note 两块缓冲均至少为 EPD_FRAME_PIXEL_BYTES 字节，不使用显示缓冲。
+ */
+esp_err_t artifacts_decode_frame(bool inbox, uint8_t *pixels, uint8_t *compressed);
+
+/**
  * @brief 从指定槽的帧头读取编码长度，空槽或坏帧头返回 ESP_ERR_NOT_FOUND。
  * @param inbox true 选上传槽，false 选开机画面槽。
  * @param[out] size 帧头声明的整帧字节数，不含槽尾空间。

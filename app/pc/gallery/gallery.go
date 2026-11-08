@@ -3,6 +3,7 @@ package gallery
 
 import (
 	"context"
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"image"
@@ -55,6 +56,19 @@ type StorageUsage struct {
 	SD    Usage `json:"sd"`
 }
 
+const (
+	thumbnailWidth  = 120
+	thumbnailHeight = 160
+	thumbnailBytes  = thumbnailWidth * thumbnailHeight * 2
+)
+
+type responseError struct {
+	status  int
+	message string
+}
+
+func (e responseError) Error() string { return e.message }
+
 var client = &http.Client{
 	Transport: &http.Transport{DialContext: (&net.Dialer{Timeout: 5 * time.Second}).DialContext},
 	Timeout:   15 * time.Second,
@@ -97,14 +111,53 @@ func Preview(ctx context.Context, host string, port int, source Source, id strin
 	return panel.DecodeFrame(body)
 }
 
-// Thumbnail 读取现有面板帧，以面积加权的缩放生成 120×160 列表预览。
+// Thumbnail 优先读取板端的 120×160 小图，旧固件或板端暂无法生成小图时按整帧缩放。
 func Thumbnail(ctx context.Context, host string, port int, source Source, id string) (*image.NRGBA, error) {
+	query := frameQuery(source, id)
+	for attempt := 0; ; attempt++ {
+		body, err := request(ctx, http.MethodGet, host, port, "/frame/thumb", query, http.StatusOK, thumbnailBytes,
+			"相框上已找不到这张图片，请刷新列表")
+		if err == nil {
+			return decodeThumbnail(body)
+		}
+		status, ok := err.(responseError)
+		if !ok {
+			return nil, err
+		}
+		if status.status == http.StatusTooManyRequests && attempt < 4 {
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-time.After(250 * time.Millisecond):
+				continue
+			}
+		}
+		if status.status != http.StatusNotFound && status.status != http.StatusServiceUnavailable {
+			return nil, err
+		}
+		break
+	}
+
 	full, err := Preview(ctx, host, port, source, id)
 	if err != nil {
 		return nil, err
 	}
-	thumb := image.NewNRGBA(image.Rect(0, 0, panel.Width/10, panel.Height/10))
+	thumb := image.NewNRGBA(image.Rect(0, 0, thumbnailWidth, thumbnailHeight))
 	draw.BiLinear.Scale(thumb, thumb.Bounds(), full, full.Bounds(), draw.Src, nil)
+	return thumb, nil
+}
+
+// decodeThumbnail 还原行优先的 RGB565 小端像素，完整载荷才可显示。
+func decodeThumbnail(data []byte) (*image.NRGBA, error) {
+	if len(data) != thumbnailBytes {
+		return nil, fmt.Errorf("缩略图长度错误：收到 %d 字节", len(data))
+	}
+	thumb := image.NewNRGBA(image.Rect(0, 0, thumbnailWidth, thumbnailHeight))
+	for i := range thumbnailWidth * thumbnailHeight {
+		pixel := binary.LittleEndian.Uint16(data[2*i:])
+		r, g, b := uint8(pixel>>11), uint8(pixel>>5&0x3f), uint8(pixel&0x1f)
+		copy(thumb.Pix[4*i:], []byte{r<<3 | r>>2, g<<2 | g>>4, b<<3 | b>>2, 255})
+	}
 	return thumb, nil
 }
 
@@ -152,11 +205,12 @@ func request(ctx context.Context, method, host string, port int, path string, qu
 	}
 	defer response.Body.Close()
 	if response.StatusCode == http.StatusNotFound {
-		return nil, fmt.Errorf("%s", missing)
+		return nil, responseError{status: response.StatusCode, message: missing}
 	}
 	if response.StatusCode != wantStatus {
 		body, _ := io.ReadAll(io.LimitReader(response.Body, 1024))
-		return nil, fmt.Errorf("HTTP %d：%s", response.StatusCode, strings.TrimSpace(string(body)))
+		return nil, responseError{status: response.StatusCode,
+			message: fmt.Sprintf("HTTP %d：%s", response.StatusCode, strings.TrimSpace(string(body)))}
 	}
 	body, err := io.ReadAll(io.LimitReader(response.Body, int64(limit)+1))
 	if err != nil {
