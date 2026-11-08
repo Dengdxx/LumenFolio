@@ -11,7 +11,7 @@ require (
 	golang.org/x/tools v0.52.0 // indirect
 )
 
-replace lumenfolio => ..
+replace lumenfolio => ../../pc
 
 tool (
 	golang.org/x/mobile/cmd/gobind

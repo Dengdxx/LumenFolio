@@ -62,7 +62,7 @@
 
 ## 五、配套 App
 
-LumenFolio 提供 Windows 和 Android 配套 App，支持图片取景、六色预览、上传相框和导出帧文件。
+LumenFolio 的 Windows 配套 App 位于 `app/pc/`，Android 配套 App 位于 `app/android/`。两端支持图片取景、六色预览、上传相框和导出帧文件。
 
 - **双端同步**。新增、调整或修复 App 功能，以及变更 App 使用的相框接口时，必须在同一变更中同步更新 Windows 和 Android，并验证两端受影响的操作。
 - 取景、抖动和帧编码复用同一套 Go 实现。两端的界面和交互按各自平台设计。

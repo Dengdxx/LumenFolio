@@ -1,6 +1,6 @@
 # LumenFolio Android
 
-Android 版与 [Windows 图形界面](../docs/preview.md) 共用取景、六色抖动和帧编码。界面跟随 Android 的深浅色设置。
+Android 版与 [Windows 图形界面](../../docs/preview.md) 共用取景、六色抖动和帧编码。界面跟随 Android 的深浅色设置。
 
 ## 使用
 
@@ -17,20 +17,20 @@ Android 版与 [Windows 图形界面](../docs/preview.md) 共用取景、六色�
 
 需要 Go 1.27、JDK 17、Android SDK 36、Android NDK 和 Gradle 8.13。设置 `ANDROID_HOME` 指向 SDK。NDK 可以由 SDK Manager 并排安装，也可以用 `ANDROID_NDK_HOME` 指定。App 的最低系统版本为 Android 8.0。
 
-先在仓库根目录执行以下 PowerShell 命令生成供 Gradle 引用的 AAR。绑定工具版本由 `lumenfolio/mobilepanel/go.mod` 指定。
+先在仓库根目录执行以下 PowerShell 命令生成供 Gradle 引用的 AAR。绑定工具版本由 `app/android/mobilepanel/go.mod` 指定。
 
 ```powershell
-New-Item -ItemType Directory -Force android/app/libs | Out-Null
-Push-Location lumenfolio/mobilepanel
+New-Item -ItemType Directory -Force app/android/app/libs | Out-Null
+Push-Location app/android/mobilepanel
 go install tool
 $toolBin = go env GOBIN
 if (-not $toolBin) { $toolBin = Join-Path (go env GOPATH) 'bin' }
 $env:Path = "$toolBin;$env:Path"
-gomobile bind -target=android -androidapi 26 -javapkg=org.lumenfolio -o ../../android/app/libs/mobilepanel.aar .
+gomobile bind -target=android -androidapi 26 -javapkg=org.lumenfolio -o ../app/libs/mobilepanel.aar .
 Pop-Location
 ```
 
-用 Android Studio 打开 `android`，也可以在仓库根目录用 `gradle -p android :app:assembleDebug`。Go 绑定和共用图像处理代码改动后，重新生成 AAR。
+用 Android Studio 打开 `app/android`，也可以在仓库根目录用 `gradle -p app/android :app:assembleDebug`。Go 绑定和共用图像处理代码改动后，重新生成 AAR。
 
 ## 易错点（务必遵守）
 

@@ -56,8 +56,8 @@ I (…) wifi: 已连上 smd，IP 192.168.137.42，网关 192.168.137.1，OTA 端
 在 ESP-IDF 终端从仓库根目录执行 `idf.py build`，生成 `build/LumenFolio.bin`。将电脑接入同一热点，[编译桌面端](preview.md#运行)，然后在仓库根目录用设备的实际 IP 查询状态并升级。客户端会等待设备重启，并在核对镜像后自动确认。
 
 ```powershell
-.\lumenfolio\LumenFolio.exe --host 192.168.137.42 ota status
-.\lumenfolio\LumenFolio.exe --host 192.168.137.42 ota .\build\LumenFolio.bin
+.\app\pc\LumenFolio.exe --host 192.168.137.42 ota status
+.\app\pc\LumenFolio.exe --host 192.168.137.42 ota .\build\LumenFolio.bin
 ```
 
 ### 通过 HTTP 手动升级
