@@ -1,0 +1,276 @@
+package org.lumenfolio.android
+
+import android.app.Application
+import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.net.Uri
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.referentialEqualityPolicy
+import androidx.compose.runtime.setValue
+import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.viewModelScope
+import java.io.IOException
+import java.net.URISyntaxException
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.job
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
+import org.lumenfolio.mobilepanel.Crop
+import org.lumenfolio.mobilepanel.Mobilepanel
+import org.lumenfolio.mobilepanel.Picture
+import org.lumenfolio.mobilepanel.Rendered
+
+/** 取景界面使用缩略图，采样始终使用同一张 Go 原图及其像素坐标。 */
+internal data class EditorPicture(
+    val picture: Picture,
+    val bitmap: Bitmap,
+    val width: Int,
+    val height: Int,
+    val crop: Crop,
+)
+
+internal class FrameUploadViewModel(application: Application) : AndroidViewModel(application) {
+    private val preferences = application.getSharedPreferences("lumenfolio", Context.MODE_PRIVATE)
+    private val contentResolver = application.contentResolver
+
+    var editor by mutableStateOf<EditorPicture?>(null, referentialEqualityPolicy())
+        private set
+    var algorithm by mutableStateOf(0)
+        private set
+    private var showingPreview by mutableStateOf(false)
+    val previewMode: Boolean get() = showingPreview
+    var preview by mutableStateOf<Bitmap?>(null)
+        private set
+    var previewing by mutableStateOf(false)
+        private set
+    var address by mutableStateOf(preferences.getString("frame_address", "").orEmpty())
+        private set
+    var busy by mutableStateOf(false)
+        private set
+    var sending by mutableStateOf(false)
+        private set
+    var reply by mutableStateOf<FrameClient.Reply?>(null)
+        private set
+    var message by mutableStateOf<String?>(null)
+        private set
+
+    private data class RenderCache(
+        val editor: EditorPicture,
+        val algorithm: Int,
+        val rendered: Rendered,
+    )
+
+    private var cachedRender: RenderCache? = null
+    private var previewJob: Job? = null
+    private val imageWork = Mutex()
+
+    fun openImage(uri: Uri) {
+        runOperation(failure = "没打开图片") {
+            val bytes = withContext(Dispatchers.IO) {
+                contentResolver.openInputStream(uri)?.use { it.readBytes() }
+                    ?: throw IOException("无法读取选中的图片")
+            }
+            val opened = processImage {
+                val picture = Mobilepanel.openPicture(bytes)
+                val width = picture.width()
+                val height = picture.height()
+                var sampleSize = 1
+                while (maxOf(width, height) / sampleSize > 2048) {
+                    sampleSize *= 2
+                }
+                val options = BitmapFactory.Options().apply { inSampleSize = sampleSize }
+                val thumbnail = BitmapFactory.decodeByteArray(bytes, 0, bytes.size, options)
+                    ?: throw IOException("无法生成图片缩略图")
+                EditorPicture(picture, thumbnail, width, height, picture.initialCrop())
+            }
+            editor = opened
+            showingPreview = false
+            invalidatePreview()
+        }
+    }
+
+    fun selectAlgorithm(index: Int) {
+        if (busy || index == algorithm) return
+        algorithm = index
+        invalidatePreview()
+    }
+
+    fun setPreviewMode(enabled: Boolean) {
+        if (busy || editor == null || enabled == previewMode) return
+        showingPreview = enabled
+        if (enabled) refreshPreview() else stopPreview()
+    }
+
+    fun transform(
+        dx: Double,
+        dy: Double,
+        factor: Double,
+        anchorX: Double,
+        anchorY: Double,
+        degrees: Double,
+    ) {
+        editCrop { it.crop.transform(dx, dy, factor, anchorX, anchorY, degrees) }
+    }
+
+    fun rotate(degrees: Double) {
+        editCrop { it.crop.rotate(degrees) }
+    }
+
+    fun resetCrop() {
+        editCrop { it.picture.initialCrop() }
+    }
+
+    private fun editCrop(change: (EditorPicture) -> Crop) {
+        val current = editor ?: return
+        if (busy) return
+        editor = current.copy(crop = change(current))
+        invalidatePreview()
+    }
+
+    fun editAddress(value: String) {
+        if (busy) return
+        address = value
+        reply = null
+    }
+
+    private fun rememberAddress(host: String) {
+        preferences.edit().putString("frame_address", host).apply()
+    }
+
+    fun sendPicture() {
+        val snapshot = editor ?: return
+        val preset = algorithm
+        val host = address.trim()
+        if (host.isEmpty()) return
+        runOperation(upload = true, failure = "没能发送画面") {
+            val rendered = render(snapshot, preset)
+            val frame = processImage { rendered.frame() }
+            val response = try {
+                withContext(Dispatchers.IO) { FrameClient.send(host, frame) }
+            } catch (_: URISyntaxException) {
+                FrameClient.Reply(FrameClient.Status.FAILED, "请输入相框 IP 或主机名，例如 192.168.1.42。")
+            } catch (_: IOException) {
+                FrameClient.Reply(
+                    FrameClient.Status.FAILED,
+                    "未收到相框回执。请查看屏幕并确认相框已唤醒、地址正确，再重试。",
+                )
+            }
+            if (response.status != FrameClient.Status.FAILED) {
+                rememberAddress(host)
+            }
+            reply = response
+        }
+    }
+
+    fun exportPicture(uri: Uri) {
+        val snapshot = editor ?: return
+        val preset = algorithm
+        runOperation(failure = "没能导出帧文件") {
+            val rendered = render(snapshot, preset)
+            val frame = processImage { rendered.frame() }
+            withContext(Dispatchers.IO) {
+                contentResolver.openOutputStream(uri, "wt")?.use { it.write(frame) }
+                    ?: throw IOException("无法写入选中的文件")
+            }
+            message = "已导出 ${frame.size} 字节的帧文件"
+        }
+    }
+
+    private fun runOperation(upload: Boolean = false, failure: String, action: suspend () -> Unit) {
+        if (busy) return
+        stopPreview()
+        busy = true
+        sending = upload
+        reply = null
+        message = null
+        viewModelScope.launch {
+            try {
+                action()
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                message = "$failure：${error.localizedMessage.orEmpty()}"
+            } finally {
+                busy = false
+                sending = false
+                refreshPreview()
+            }
+        }
+    }
+
+    private fun invalidatePreview() {
+        stopPreview()
+        cachedRender = null
+        preview = null
+        reply = null
+        message = null
+        refreshPreview()
+    }
+
+    private fun stopPreview() {
+        previewJob?.cancel()
+        previewJob = null
+        previewing = false
+    }
+
+    /** 预览协程持有单次请求，取消后仍可能等待 Go 调用结束，只有当前协程可提交结果。 */
+    private fun refreshPreview() {
+        val snapshot = editor ?: return
+        if (!previewMode || busy || preview != null || previewJob != null) return
+        val preset = algorithm
+        val job = viewModelScope.launch(start = CoroutineStart.LAZY) {
+            try {
+                delay(120)
+                val rendered = render(snapshot, preset)
+                val bitmap = processImage {
+                    val png = rendered.preview()
+                    BitmapFactory.decodeByteArray(png, 0, png.size)
+                        ?: throw IOException("无法读取六色预览")
+                }
+                if (previewJob === coroutineContext.job) {
+                    preview = bitmap
+                }
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                if (previewJob === coroutineContext.job) {
+                    message = "没能生成预览：${error.localizedMessage.orEmpty()}"
+                }
+            } finally {
+                if (previewJob === coroutineContext.job) {
+                    previewJob = null
+                    previewing = false
+                }
+            }
+        }
+        previewJob = job
+        previewing = true
+        job.start()
+    }
+
+    private suspend fun render(snapshot: EditorPicture, preset: Int): Rendered {
+        cachedRender?.let { cache ->
+            if (cache.editor === snapshot && cache.algorithm == preset) return cache.rendered
+        }
+        val rendered = processImage { snapshot.picture.render(snapshot.crop, preset) }
+        cachedRender = RenderCache(snapshot, preset, rendered)
+        return rendered
+    }
+
+    /** Go 调用不可协作取消，用同一把锁限制并发的解码、取样、抖动与编码。 */
+    private suspend fun <T> processImage(action: () -> T): T = withContext(Dispatchers.Default) {
+        imageWork.withLock {
+            ensureActive()
+            action()
+        }
+    }
+}

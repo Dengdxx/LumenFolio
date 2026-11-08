@@ -1,0 +1,7 @@
+.gradle/
+.idea/
+.kotlin/
+local.properties
+*.iml
+app/libs/mobilepanel.aar
+app/libs/mobilepanel-sources.jar
