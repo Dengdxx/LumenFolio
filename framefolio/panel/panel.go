@@ -51,13 +51,14 @@ func Encode(src *image.NRGBA) []byte {
 	copy(frame, "EPD1")
 	binary.LittleEndian.PutUint16(frame[8:], Width)
 	binary.LittleEndian.PutUint16(frame[10:], Height)
+	matcher := (ColorOptions{}).matcher()
 	origin := src.Bounds().Min
 	for y := range Height {
 		for x := 0; x < Width; x += 2 {
 			i := src.PixOffset(origin.X+x, origin.Y+y)
-			hi := nearest(src.Pix[i], src.Pix[i+1], src.Pix[i+2]).Index >> 4
+			hi := inks[matcher.nearest(src.Pix[i], src.Pix[i+1], src.Pix[i+2])].Index >> 4
 			j := src.PixOffset(origin.X+x+1, origin.Y+y)
-			lo := nearest(src.Pix[j], src.Pix[j+1], src.Pix[j+2]).Index & 0x0f
+			lo := inks[matcher.nearest(src.Pix[j], src.Pix[j+1], src.Pix[j+2])].Index & 0x0f
 			frame[12+y*Width/2+x/2] = hi<<4 | lo
 		}
 	}
