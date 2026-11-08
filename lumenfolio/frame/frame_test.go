@@ -15,7 +15,7 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"framefolio/panel"
+	"lumenfolio/panel"
 )
 
 func rawFrame() []byte {

@@ -13,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	"framefolio/panel"
+	"lumenfolio/panel"
 )
 
 // Send 把一帧 EPD1／EPD2 按实际编码长度 POST 到设备的 /frame。

@@ -41,7 +41,7 @@ static esp_err_t read_frame_file(void *context, size_t offset, uint8_t *data, si
 
 bool board_sd_present()
 {
-    return gpio_get_level(framefolio::board::kSdCardDetect) == 0;
+    return gpio_get_level(lumenfolio::board::kSdCardDetect) == 0;
 }
 
 bool board_sd_mounted()
@@ -74,12 +74,12 @@ esp_err_t board_sd_mount()
 
     sdmmc_slot_config_t slot = SDMMC_SLOT_CONFIG_DEFAULT();
     slot.width = 4;
-    slot.clk   = framefolio::board::kSdClk;
-    slot.cmd   = framefolio::board::kSdCmd;
-    slot.d0    = framefolio::board::kSdD0;
-    slot.d1    = framefolio::board::kSdD1;
-    slot.d2    = framefolio::board::kSdD2;
-    slot.d3    = framefolio::board::kSdD3;
+    slot.clk   = lumenfolio::board::kSdClk;
+    slot.cmd   = lumenfolio::board::kSdCmd;
+    slot.d0    = lumenfolio::board::kSdD0;
+    slot.d1    = lumenfolio::board::kSdD1;
+    slot.d2    = lumenfolio::board::kSdD2;
+    slot.d3    = lumenfolio::board::kSdD3;
     slot.cd    = SDMMC_SLOT_NO_CD;  // 卡检测由 board_sd_present() 自己读，不交给驱动
     slot.wp    = SDMMC_SLOT_NO_WP;
     slot.flags = 0;                 // 板上已有 47k 外部上拉

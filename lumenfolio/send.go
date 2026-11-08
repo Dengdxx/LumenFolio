@@ -9,8 +9,8 @@ import (
 	"io"
 	"os"
 
-	"framefolio/frame"
-	"framefolio/panel"
+	"lumenfolio/frame"
+	"lumenfolio/panel"
 )
 
 // encodePicture 按指定抖动算法把当前构图编成一帧无损编码。
@@ -74,7 +74,7 @@ func runFrame(ctx context.Context, host string, args []string, out, errOut io.Wr
 		return 2
 	}
 	if flags.NArg() != 1 {
-		fmt.Fprintln(errOut, "用法：FrameFolio --host IP frame [选项] 图片.png|jpg|jpeg")
+		fmt.Fprintln(errOut, "用法：LumenFolio --host IP frame [选项] 图片.png|jpg|jpeg")
 		return 2
 	}
 	file, err := os.Open(flags.Arg(0))
@@ -112,7 +112,7 @@ func runExport(args []string, out, errOut io.Writer) int {
 		return 2
 	}
 	if flags.NArg() != 2 {
-		fmt.Fprintln(errOut, "用法：FrameFolio export [选项] 图片.png|jpg|jpeg 输出.bin")
+		fmt.Fprintln(errOut, "用法：LumenFolio export [选项] 图片.png|jpg|jpeg 输出.bin")
 		return 2
 	}
 	file, err := os.Open(flags.Arg(0))

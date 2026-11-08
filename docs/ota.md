@@ -1,4 +1,4 @@
-# FrameFolio 局域网 OTA
+# LumenFolio 局域网 OTA
 
 相框固件作为 STA 接入外部热点，在这条连接上开 HTTP 服务接收应用镜像：写入备用槽，重启，由客户端确认后生效。未确认的新镜像由 bootloader 回滚。
 
@@ -41,7 +41,7 @@ idf.py flash monitor
 
 完整烧录会写入 factory 并重置 otadata；应用和启动选择会更新，NVS 和未列入烧录参数的资产区域保留。只有明确需要清空设备时才使用 `idf.py erase-flash`，该操作会删除 NVS、图片和 OTA 状态，容量更新本身不要求它。
 
-旧品牌固件的 OTA 会拒绝工程名不同的镜像，首次迁移同样走 USB；之后的日常升级走无线。
+旧固件的 OTA 要求镜像与运行中的固件工程名一致。若 `GET /ota/status` 的 `project` 还不是 `LumenFolio`，先按本节核对分区布局，再用 USB 烧录 LumenFolio。设备启动后确认 `project` 为 `LumenFolio`，即可走日常无线升级。
 
 ## 日常升级
 
@@ -53,13 +53,22 @@ I (…) wifi: 已连上 smd，IP 192.168.137.42，网关 192.168.137.1，OTA 端
 
 设备只有 2.4 GHz 射频。电脑热点若被系统放在 5 GHz，设备扫不到也连不上，需要把热点的频段改成 2.4 GHz。
 
-在 ESP-IDF 终端从仓库根目录执行 `idf.py build`，生成 `build/FrameFolio.bin`。用 `python -m esptool image-info build/FrameFolio.bin` 查看镜像的 App version 和 ELF file SHA256，重启后确认时会用到。电脑接在同一个热点上，替换下方示例 IP，然后上传应用镜像。
+在 ESP-IDF 终端从仓库根目录执行 `idf.py build`，生成 `build/LumenFolio.bin`。将电脑接入同一热点，[编译桌面端](preview.md#运行)，然后在仓库根目录用设备的实际 IP 查询状态并升级。客户端会等待设备重启，并在核对镜像后自动确认。
+
+```powershell
+.\lumenfolio\LumenFolio.exe --host 192.168.137.42 ota status
+.\lumenfolio\LumenFolio.exe --host 192.168.137.42 ota .\build\LumenFolio.bin
+```
+
+### 通过 HTTP 手动升级
+
+用 `python -m esptool image-info build/LumenFolio.bin` 查看镜像的 App version 和 ELF file SHA256，重启后确认时会用到。
 
 ```powershell
 $device = 'http://192.168.137.42:8080'
 $before = Invoke-RestMethod "$device/ota/status"
 $before
-curl.exe --fail-with-body -H 'Content-Type: application/octet-stream' --data-binary '@build/FrameFolio.bin' "$device/ota"
+curl.exe --fail-with-body -H 'Content-Type: application/octet-stream' --data-binary '@build/LumenFolio.bin' "$device/ota"
 ```
 
 设备收到有效镜像后返回 HTTP 202，约 1 秒后重启。重新连上热点后查询状态，如果 IP 变了，先更新 `$device`。
@@ -69,7 +78,7 @@ $after = Invoke-RestMethod "$device/ota/status"
 $after
 ```
 
-在新镜像启动后的 60 秒内，确认 `project` 为 `FrameFolio`、`phase` 为 `pending_verify`、`ready` 为 `true`、`running_partition` 与 `$before.update_partition` 一致，并核对 `version` 和 `image_id` 分别与新镜像的 App version 和 ELF file SHA256 一致，然后发送确认。确认成功后返回 `phase: idle` 和 `pending_verify: false`。
+在新镜像启动后的 60 秒内，确认 `project` 为 `LumenFolio`、`phase` 为 `pending_verify`、`ready` 为 `true`、`running_partition` 与 `$before.update_partition` 一致，并核对 `version` 和 `image_id` 分别与新镜像的 App version 和 ELF file SHA256 一致，然后发送确认。确认成功后返回 `phase: idle` 和 `pending_verify: false`。
 
 ```powershell
 Invoke-RestMethod -Method Post -Uri "$device/ota/confirm" -Headers @{
@@ -125,8 +134,7 @@ idf.py flash
 - 现象：改了分区表后启动异常、NVS 报错或分区重叠。原因：新旧布局的起点不同，或启动选择仍指向旧槽。解决：先核对旧表；起点相同且仅扩大资产区时可有线更新，起点不同时先迁移数据，不要盲目整片擦除。
 - 现象：16 MB Flash 仍按 8 MB 使用。原因：生成的 sdkconfig 覆盖了新的默认配置。解决：确认 `CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y` 和 `CONFIG_ESPTOOLPY_FLASHSIZE="16MB"`，重新构建并有线更新 bootloader 和分区表；8 MiB 上界是 `0x800000`，16 MiB 上界才是 `0x1000000`，都不可越界访问。
 - 现象：上传过程中屏幕花掉或设备崩溃。原因：`esp_ota_write` 写 Flash 时会关闭 cache，而帧缓冲放在 PSRAM 里，这段窗口内访问 PSRAM 会出错。解决：上传期间不要刷新屏幕；开机那次自检刷屏也要错开上传。
-- 现象：FrameFolio 桌面端的 `ota` 命令拒绝上传 `FrameFolio.bin`。原因：它在本地校验的是旧工程名。解决：按「日常升级」直接调用设备 HTTP 接口。
-- 现象：设备返回 HTTP 422，提示 `ESP_ERR_INVALID_ARG`。原因：上传的镜像与运行中的固件工程名不同。解决：用 `GET /ota/status` 检查 `project`，旧品牌设备先按「首次部署」走 USB 迁移，已迁移设备使用 `idf.py build` 生成的 `build/FrameFolio.bin`。
+- 现象：桌面端提示设备与镜像工程名不一致，或手动上传返回 HTTP 422 和 `ESP_ERR_INVALID_ARG`。原因：镜像与设备当前固件的工程名不同。解决：用 `ota status` 或 `GET /ota/status` 检查 `project`。旧设备先按「首次部署与容量更新」走 USB 迁移，已迁移设备使用 `idf.py build` 生成的 `build/LumenFolio.bin`。
 - 现象：待确认期间 NVS 初始化失败后参数全没了。原因：在待确认状态下擦除了 NVS，回滚回去的旧镜像依赖这些数据。解决：保持 `app_main` 里的判断，`otaServicePendingVerification()` 为 true 时不得调用 `nvs_flash_erase()`。
 - 现象：按 KEY1 时设备意外回到 factory 或改变启动模式。原因：打开了 `CONFIG_BOOTLOADER_FACTORY_RESET` 且绑在 GPIO3 上。解决：不要添加该项，sdkconfig 里不应出现 `CONFIG_BOOTLOADER_FACTORY_RESET`。
 - 现象：镜像能编译但烧不进去，或 OTA 槽装不下。原因：应用超过 0x180000。解决：用 `idf.py size` 确认应用小于 1,572,864 字节；超出就减体积，不要加大 factory，OTA 槽与它等大。

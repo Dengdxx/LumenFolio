@@ -16,7 +16,7 @@
  * 引脚保持、唤醒源和最后那一下 esp_deep_sleep_start()。
  */
 
-namespace framefolio::board_sleep {
+namespace lumenfolio::board_sleep {
 
 /** @brief 定时唤醒间隔，秒。用来发现"睡眠中被插上电"，也用来计防残影的周期。 */
 inline constexpr uint32_t kTimerWakeSeconds = 600;
@@ -69,4 +69,4 @@ bool take_refresh_slot();
  */
 void release_holds();
 
-}  // namespace framefolio::board_sleep
+}  // namespace lumenfolio::board_sleep

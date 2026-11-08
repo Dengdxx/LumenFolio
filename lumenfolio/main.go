@@ -1,4 +1,4 @@
-// Package main 是 FrameFolio 的 Windows 桌面端。
+// Package main 是 LumenFolio 的 Windows 桌面端。
 //
 // 不带参数或传入一张 PNG/JPEG 时打开界面。ota 上传固件，frame 把一张图发到相框，export 把图编成帧写到本地。
 // Gio 的事件循环只在打开界面时从主 goroutine 启动，命令行路径不进入它。
@@ -15,7 +15,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"framefolio/ota"
+	"lumenfolio/ota"
 )
 
 // launchGUI 判断这组参数应打开界面还是进入命令行。
@@ -42,11 +42,11 @@ func launchGUI(args []string) (bool, string) {
 // 退出码：0 成功（含 -h），1 运行期错误（网络、设备或文件），2 参数或用法错误。
 // 界面入口不走这里。ctx 用于取消上传与等待；out 输出正常结果，errOut 输出用法与错误。
 func run(ctx context.Context, args []string, out, errOut io.Writer) int {
-	global := flag.NewFlagSet("FrameFolio", flag.ContinueOnError)
+	global := flag.NewFlagSet("LumenFolio", flag.ContinueOnError)
 	global.SetOutput(errOut)
 	host := global.String("host", "", "设备 IP，取设备串口日志里打印的地址")
 	global.Usage = func() {
-		fmt.Fprintln(errOut, "FrameFolio\n用法：FrameFolio [图片.png|jpg|jpeg]\n      FrameFolio [全局选项] ota [命令选项] 应用.bin|status\n      FrameFolio --host IP frame [命令选项] 图片\n      FrameFolio export [命令选项] 图片 输出.bin\n不带参数时打开界面。")
+		fmt.Fprintln(errOut, "LumenFolio\n用法：LumenFolio [图片.png|jpg|jpeg]\n      LumenFolio [全局选项] ota [命令选项] 应用.bin|status\n      LumenFolio --host IP frame [命令选项] 图片\n      LumenFolio export [命令选项] 图片 输出.bin\n不带参数时打开界面。")
 		global.PrintDefaults()
 	}
 	if err := global.Parse(args); err != nil {

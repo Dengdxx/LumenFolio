@@ -1,14 +1,14 @@
 # 六色预览
 
-FrameFolio 桌面端在 Windows 上以一个 exe 提供图形界面和命令行。不带参数，或唯一参数是一张 PNG／JPEG 时，打开界面；`ota`、`frame`、`export`、选项和其他参数走命令行，未知命令退出码为 2，不开窗口。界面在 1200×1600 的六色面板上选构图、比较抖动。固件升级步骤见 [局域网 OTA](ota.md)。
+LumenFolio 桌面端在 Windows 上以一个 exe 提供图形界面和命令行。不带参数，或唯一参数是一张 PNG／JPEG 时，打开界面；`ota`、`frame`、`export`、选项和其他参数走命令行，未知命令退出码为 2，不开窗口。界面在 1200×1600 的六色面板上选构图、比较抖动。固件升级步骤见 [局域网 OTA](ota.md)。
 
 ## 代码边界
 
 界面和命令行共用能力，不共用窗口。两边都要调用的代码放在不引用 `gioui.org` 的包里；只服务于指针、字体、控件和布局的代码留在主包。
 
-- `framefolio/panel`：取景、按取景框采样、六色抖动，以及把抖动结果编成帧。压得更小时是 EPD2，否则是 EPD1。墨水索引与固件帧缓冲的半字节一致。
-- `framefolio/frame`：把一整帧 POST 到设备的 `/frame`。界面的「上传到相框」和命令行的 `frame` 都调用它。
-- `framefolio/ota`：查询 `/ota/status`、上传应用镜像、等待重启并确认。命令行的 `ota` 子命令调用这个包。
+- `lumenfolio/panel`：取景、按取景框采样、六色抖动，以及把抖动结果编成帧。压得更小时是 EPD2，否则是 EPD1。墨水索引与固件帧缓冲的半字节一致。
+- `lumenfolio/frame`：把一整帧 POST 到设备的 `/frame`。界面的「上传到相框」和命令行的 `frame` 都调用它。
+- `lumenfolio/ota`：查询 `/ota/status`、上传应用镜像、等待重启并确认。命令行的 `ota` 子命令调用这个包。
 - 主包（`ui.go`、`gesture.go`、`send.go`）：窗口、字体、控件、布局、屏幕坐标和拖拽，以及把一张图交给上面两个包。`app.Main` 只在打开界面时由主 goroutine 调用，命令行路径不进入它。
 
 这样分是因为 Gio 的事件循环会占住进程。共用包一旦引用 Gio，只跑命令行也会链进界面运行时。Go 也不允许在主包给 `panel.Crop` 增加方法，所以屏幕上的平移和旋转是主包函数，算完再调用 `Move`、`RotateAroundFrameCenter`、`Zoom`。
@@ -34,8 +34,8 @@ FrameFolio 桌面端在 Windows 上以一个 exe 提供图形界面和命令行�
 源码变化后先编译一次，之后直接跑生成的 exe：
 
 ```powershell
-go -C framefolio build -o FrameFolio.exe .
-.\framefolio\FrameFolio.exe
+go -C lumenfolio build -o LumenFolio.exe .
+.\lumenfolio\LumenFolio.exe
 ```
 
 exe 不入库，源码没变就不要重新编译。不带参数打开空白界面；把一张 PNG／JPEG 路径作为唯一参数时，程序会在启动后直接打开它。读图成功、取消选择或读取失败都会主动更新界面，不需要移动鼠标触发。
@@ -67,8 +67,8 @@ exe 不入库，源码没变就不要重新编译。不带参数打开空白界�
 「导出帧文件」用同样的编码写到本地 `.bin`，不连接设备。命令行不带取景调整，按整图等比放进面板、居中、不旋转来编码：
 
 ```powershell
-.\framefolio\FrameFolio.exe export 照片.png 画面.bin
-.\framefolio\FrameFolio.exe --host 192.168.137.42 frame 照片.png
+.\lumenfolio\LumenFolio.exe export 照片.png 画面.bin
+.\lumenfolio\LumenFolio.exe --host 192.168.137.42 frame 照片.png
 ```
 
 `--alg` 是抖动算法序号，与界面列表一致，从 0 起，默认 1（Floyd-Steinberg）。导出的文件和 TF 卡上的帧是同一种格式，拷进卡的根目录后用翻页命令显示。
@@ -92,14 +92,14 @@ EPD1 从偏移 12 起直接存 960000 字节像素，总长 960012。EPD2 从偏
 ## 回归测试
 
 ```bash
-go -C framefolio test -p=1 ./...
+go -C lumenfolio test -p=1 ./...
 ```
 
 ```bash
-go -C framefolio vet -p=1 ./...
+go -C lumenfolio vet -p=1 ./...
 ```
 
-取景、抖动和帧编码的测试在 `framefolio/panel`，传图在 `framefolio/frame`，固件上传在 `framefolio/ota`，指针手势和导出命令在主包。上面的 `./...` 会一起跑，覆盖取景变换、透明度与白底合成、六色抖动、EPD2 无损还原与 EPD1 回退、非法帧拒绝、实际传输长度、导出字节数、鼠标事件路由、后台结果交付和完整预览显示。并发交付使用 `testing/synctest` 控制任务时序，不依赖真实时间休眠。离屏绘制测试覆盖普通窗口、不同留边和高 DPI；无法创建 GPU 后端时会标记跳过，不能把跳过视为已验证显示效果。
+取景、抖动和帧编码的测试在 `lumenfolio/panel`，传图在 `lumenfolio/frame`，固件上传在 `lumenfolio/ota`，指针手势和导出命令在主包。上面的 `./...` 会一起跑，覆盖取景变换、透明度与白底合成、六色抖动、EPD2 无损还原与 EPD1 回退、非法帧拒绝、实际传输长度、导出字节数、鼠标事件路由、后台结果交付和完整预览显示。并发交付使用 `testing/synctest` 控制任务时序，不依赖真实时间休眠。离屏绘制测试覆盖普通窗口、不同留边和高 DPI；无法创建 GPU 后端时会标记跳过，不能把跳过视为已验证显示效果。
 
 Python 产帧工具的六色色码、高低半字节顺序、原始帧回退与尺寸边界：
 

@@ -17,7 +17,7 @@ import (
 	"strings"
 	"testing"
 
-	"framefolio/panel"
+	"lumenfolio/panel"
 )
 
 func solid(c color.NRGBA, w, h int) image.Image {

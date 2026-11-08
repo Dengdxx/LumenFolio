@@ -48,8 +48,8 @@ func otaAddress(t *testing.T, server *httptest.Server) (string, string) {
 func TestOTASuccessAndLostReplies(t *testing.T) {
 	for _, loseReplies := range []bool{false, true} {
 		t.Run(map[bool]string{false: "normal", true: "lost replies"}[loseReplies], func(t *testing.T) {
-			path, data := otaFixtureImage(t, "framefilm", "new-build")
-			status := otaStatus{Phase: "idle", Ready: false, Project: "framefilm", Version: "old-build", ImageID: strings.Repeat("cd", 32),
+			path, data := otaFixtureImage(t, "LumenFolio", "new-build")
+			status := otaStatus{Phase: "idle", Ready: false, Project: "LumenFolio", Version: "old-build", ImageID: strings.Repeat("cd", 32),
 				RunningPartition: "factory", BootPartition: "factory", UpdatePartition: "ota_0", Capacity: 2 * 1024 * 1024}
 			var mu sync.Mutex
 			uploads, confirmations := 0, 0
@@ -132,7 +132,7 @@ func TestOTASuccessAndLostReplies(t *testing.T) {
 }
 
 func TestOTARejectsInvalidInputAndServerErrors(t *testing.T) {
-	path, _ := otaFixtureImage(t, "framefilm", "candidate")
+	path, _ := otaFixtureImage(t, "LumenFolio", "candidate")
 	for _, test := range []struct {
 		name      string
 		capacity  int64
@@ -148,7 +148,7 @@ func TestOTARejectsInvalidInputAndServerErrors(t *testing.T) {
 				mu.Lock()
 				defer mu.Unlock()
 				if r.URL.Path == "/ota/status" {
-					json.NewEncoder(w).Encode(otaStatus{Phase: test.phase, Ready: true, Project: "framefilm", Version: "old", ImageID: otaTestID, RunningPartition: "factory", BootPartition: "factory", UpdatePartition: "ota_0", Capacity: test.capacity})
+					json.NewEncoder(w).Encode(otaStatus{Phase: test.phase, Ready: true, Project: "LumenFolio", Version: "old", ImageID: otaTestID, RunningPartition: "factory", BootPartition: "factory", UpdatePartition: "ota_0", Capacity: test.capacity})
 					return
 				}
 				if r.URL.Path == "/ota" {
@@ -178,7 +178,7 @@ func TestOTARejectsInvalidInputAndServerErrors(t *testing.T) {
 	}
 	wrong, _ := otaFixtureImage(t, "another-project", "version")
 	var out, errOut bytes.Buffer
-	if Run(context.Background(), "127.0.0.1", []string{wrong}, &out, &errOut) == 0 || !strings.Contains(errOut.String(), "framefilm") {
+	if Run(context.Background(), "127.0.0.1", []string{wrong}, &out, &errOut) == 0 || !strings.Contains(errOut.String(), "LumenFolio") {
 		t.Fatal("wrong project accepted")
 	}
 	bad := filepath.Join(t.TempDir(), "bootloader.bin")
@@ -201,7 +201,7 @@ func TestOTAConfirmationTimeoutAndRollback(t *testing.T) {
 		{"rollback failed", otaStatus{Phase: "rollback_failed", PendingVerify: true, Version: "new", RunningPartition: "ota_0", BootPartition: "ota_0", LastError: 123}, false},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			test.status.Project = "framefilm"
+			test.status.Project = "LumenFolio"
 			if test.status.ImageID == "" {
 				test.status.ImageID = otaTestID
 			}
@@ -214,7 +214,7 @@ func TestOTAConfirmationTimeoutAndRollback(t *testing.T) {
 			defer server.Close()
 			ctx, cancel := context.WithTimeout(context.Background(), 40*time.Millisecond)
 			defer cancel()
-			err := waitOTA(ctx, server.Client(), server.URL, otaImage{Project: "framefilm", Version: "new", ImageID: otaTestID}, "ota_0", time.Millisecond)
+			err := waitOTA(ctx, server.Client(), server.URL, otaImage{Project: "LumenFolio", Version: "new", ImageID: otaTestID}, "ota_0", time.Millisecond)
 			if err == nil {
 				t.Fatal("unexpected success")
 			}
@@ -226,9 +226,9 @@ func TestOTAConfirmationTimeoutAndRollback(t *testing.T) {
 }
 
 func TestOTAResumePendingAndStatus(t *testing.T) {
-	path, _ := otaFixtureImage(t, "framefilm", "new")
+	path, _ := otaFixtureImage(t, "LumenFolio", "new")
 	var mu sync.Mutex
-	status := otaStatus{Phase: "pending_verify", Ready: true, PendingVerify: true, Project: "framefilm", Version: "new", ImageID: otaTestID, RunningPartition: "ota_1", BootPartition: "ota_1", UpdatePartition: "ota_0", Capacity: 2 << 20}
+	status := otaStatus{Phase: "pending_verify", Ready: true, PendingVerify: true, Project: "LumenFolio", Version: "new", ImageID: otaTestID, RunningPartition: "ota_1", BootPartition: "ota_1", UpdatePartition: "ota_0", Capacity: 2 << 20}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		mu.Lock()
 		defer mu.Unlock()
@@ -265,7 +265,7 @@ type otaRoundTripFunc func(*http.Request) (*http.Response, error)
 func (f otaRoundTripFunc) RoundTrip(request *http.Request) (*http.Response, error) { return f(request) }
 
 func TestOTAEarlyRejectionStopsProgress(t *testing.T) {
-	path, _ := otaFixtureImage(t, "framefilm", "new")
+	path, _ := otaFixtureImage(t, "LumenFolio", "new")
 	file, err := os.Open(path)
 	if err != nil {
 		t.Fatal(err)

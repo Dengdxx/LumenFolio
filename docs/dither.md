@@ -1,6 +1,6 @@
 # 六色面板抖动
 
-`framefolio/panel` 的 `AdditionalAlgorithms()` 返回可独立调用的额外抖动算法。每项实现现有的 `Ditherer`，调用 `Name()` 取得名称，再对取景采样后的 1200×1600 `*image.NRGBA` 调用 `Dither(src)`。结果是同尺寸的六色预览图，只使用面板调色板中的不透明颜色。桌面界面继续使用 `Algorithms()` 提供的选项。
+`lumenfolio/panel` 的 `AdditionalAlgorithms()` 返回可独立调用的额外抖动算法。每项实现现有的 `Ditherer`，调用 `Name()` 取得名称，再对取景采样后的 1200×1600 `*image.NRGBA` 调用 `Dither(src)`。结果是同尺寸的六色预览图，只使用面板调色板中的不透明颜色。桌面界面继续使用 `Algorithms()` 提供的选项。
 
 | 算法 | 区别 |
 | --- | --- |
@@ -15,7 +15,7 @@
 
 扩散核参考 [FFmpeg 的调色板滤镜](https://ffmpeg.org/doxygen/trunk/vf__paletteuse_8c_source.html)、[Crocker 的数字半色调资料](https://github.com/SixLabors/ImageSharp/blob/main/src/ImageSharp/Processing/Processors/Dithering/DHALF.TXT)和 [Jarvis、Judice、Ninke 的论文](https://doi.org/10.1016/S0146-664X(76)80003-2)。
 
-阈值图 [blue_noise_64.bin](../framefolio/panel/blue_noise_64.bin) 是 Christoph Peters 以 CC0 发布的 `Data/64_64/LDR_LLL1_0.png` 的红色通道，按行展开为 4096 个 8 位值。它在 Go 构建时嵌入，运行时直接索引。 [Free blue noise textures](https://momentsingraphics.de/BlueNoise.html)
+阈值图 [blue_noise_64.bin](../lumenfolio/panel/blue_noise_64.bin) 是 Christoph Peters 以 CC0 发布的 `Data/64_64/LDR_LLL1_0.png` 的红色通道，按行展开为 4096 个 8 位值。它在 Go 构建时嵌入，运行时直接索引。 [Free blue noise textures](https://momentsingraphics.de/BlueNoise.html)
 
 ## 调参接口
 

@@ -1,4 +1,4 @@
-module framefolio
+module lumenfolio
 
 go 1.27.0
 

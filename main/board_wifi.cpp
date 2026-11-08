@@ -60,12 +60,12 @@ void scan_once()
     bool hit = false;
     for (uint16_t i = 0; i < count; ++i) {
         const char *ssid = reinterpret_cast<const char *>(records[i].ssid);
-        const bool is_target = strcmp(ssid, framefolio::board_wifi::kSsid) == 0;
+        const bool is_target = strcmp(ssid, lumenfolio::board_wifi::kSsid) == 0;
         hit = hit || is_target;
         ESP_LOGI(kTag, "  %-24s ch=%2u rssi=%3d auth=%d%s", ssid, records[i].primary,
                  records[i].rssi, static_cast<int>(records[i].authmode), is_target ? "  <==" : "");
     }
-    ESP_LOGI(kTag, "扫描到 %u 个热点，%s %s", static_cast<unsigned>(count), framefolio::board_wifi::kSsid,
+    ESP_LOGI(kTag, "扫描到 %u 个热点，%s %s", static_cast<unsigned>(count), lumenfolio::board_wifi::kSsid,
              hit ? "在列表里" : "没扫到");
 }
 
@@ -110,7 +110,7 @@ void on_got_ip(void *, esp_event_base_t base, int32_t id, void *data)
     }
     const auto *event = static_cast<const ip_event_got_ip_t *>(data);
     connected = true;
-    ESP_LOGI(kTag, "已连上 %s，IP " IPSTR "，网关 " IPSTR "，OTA 端口 8080", framefolio::board_wifi::kSsid,
+    ESP_LOGI(kTag, "已连上 %s，IP " IPSTR "，网关 " IPSTR "，OTA 端口 8080", lumenfolio::board_wifi::kSsid,
              IP2STR(&event->ip_info.ip), IP2STR(&event->ip_info.gw));
 }
 
@@ -133,8 +133,8 @@ esp_err_t board_wifi_start_sta()
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
 
     wifi_config_t sta = {};
-    memcpy(sta.sta.ssid, framefolio::board_wifi::kSsid, sizeof(framefolio::board_wifi::kSsid));
-    memcpy(sta.sta.password, framefolio::board_wifi::kPassword, sizeof(framefolio::board_wifi::kPassword));
+    memcpy(sta.sta.ssid, lumenfolio::board_wifi::kSsid, sizeof(lumenfolio::board_wifi::kSsid));
+    memcpy(sta.sta.password, lumenfolio::board_wifi::kPassword, sizeof(lumenfolio::board_wifi::kPassword));
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &sta));
     ESP_ERROR_CHECK(esp_wifi_start());
     // OTA 传输不需要省电，关掉 modem sleep，射频保持唤醒。

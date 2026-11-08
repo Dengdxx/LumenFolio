@@ -24,7 +24,7 @@ func TestLaunchGUI(t *testing.T) {
 		{"帮助", []string{"-h"}, false, ""},
 		{"带 host", []string{"--host", "192.168.1.2", "ota", "status"}, false, ""},
 		{"未知词", []string{"foo"}, false, ""},
-		{"固件", []string{"framefilm.bin"}, false, ""},
+		{"固件", []string{"LumenFolio.bin"}, false, ""},
 		{"图片加多余参数", []string{"a.png", "b.png"}, false, ""},
 	}
 	for _, tc := range cases {

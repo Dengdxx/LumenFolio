@@ -13,14 +13,14 @@
 
 #include "esp_err.h"
 
-namespace framefolio::board_wifi {
+namespace lumenfolio::board_wifi {
 
 /** @brief 目标热点名。 */
 inline constexpr char kSsid[] = "smd";
 /** @brief 目标热点密码，WPA2 要求 8 位以上。 */
 inline constexpr char kPassword[] = "88888888";
 
-}  // namespace framefolio::board_wifi
+}  // namespace lumenfolio::board_wifi
 
 /**
  * @brief 拉起 STA 并开始连接。

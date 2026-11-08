@@ -12,14 +12,14 @@ constexpr const char *kTag = "sleep";
 
 // 三个按键都在 RTC IO 范围内（0–21），才拿得到 EXT1 唤醒这一路。
 // 充电状态脚 GPIO38/39 不在这个范围，插 USB 唤不醒，这是硬件定死的。
-constexpr gpio_num_t kWakeKeys[] = {framefolio::board::kKey1, framefolio::board::kKey2, framefolio::board::kKey3};
+constexpr gpio_num_t kWakeKeys[] = {lumenfolio::board::kKey1, lumenfolio::board::kKey2, lumenfolio::board::kKey3};
 
 // 深睡不清 RTC 内存，这个计数要跨睡眠保留。
 RTC_DATA_ATTR uint32_t s_timer_wakes;
 
 }  // namespace
 
-framefolio::board_sleep::wake_info framefolio::board_sleep::wakeup()
+lumenfolio::board_sleep::wake_info lumenfolio::board_sleep::wakeup()
 {
     wake_info info = {};
 
@@ -38,20 +38,20 @@ framefolio::board_sleep::wake_info framefolio::board_sleep::wakeup()
     }
 
     const uint64_t mask = esp_sleep_get_ext1_wakeup_status();
-    if ((mask & (1ULL << framefolio::board::kKey1)) != 0) {
+    if ((mask & (1ULL << lumenfolio::board::kKey1)) != 0) {
         info.key = true;
         info.which = BOARD_KEY_PREV;
-    } else if ((mask & (1ULL << framefolio::board::kKey2)) != 0) {
+    } else if ((mask & (1ULL << lumenfolio::board::kKey2)) != 0) {
         info.key = true;
         info.which = BOARD_KEY_NEXT;
-    } else if ((mask & (1ULL << framefolio::board::kKey3)) != 0) {
+    } else if ((mask & (1ULL << lumenfolio::board::kKey3)) != 0) {
         info.key = true;
         info.which = BOARD_KEY_AUX;
     }
     return info;
 }
 
-bool framefolio::board_sleep::take_refresh_slot()
+bool lumenfolio::board_sleep::take_refresh_slot()
 {
     ++s_timer_wakes;
     if (s_timer_wakes < kWakesPerRefresh) {
@@ -61,21 +61,21 @@ bool framefolio::board_sleep::take_refresh_slot()
     return true;
 }
 
-void framefolio::board_sleep::enter(uint32_t timer_seconds)
+void lumenfolio::board_sleep::enter(uint32_t timer_seconds)
 {
     // SY8089 的 EN 上没有下拉电阻。深睡后 GPIO40 变成高阻，EN 会浮空，
     // 3V3_EXT 有可能自己又起来，面板就白吃电——必须把低电平锁住。
-    gpio_set_level(framefolio::board::kPeriphPowerEn, 0);
-    gpio_hold_en(framefolio::board::kPeriphPowerEn);
+    gpio_set_level(lumenfolio::board::kPeriphPowerEn, 0);
+    gpio_hold_en(lumenfolio::board::kPeriphPowerEn);
 
     // 分压开关同理：Q7 栅极浮空可能导通，220k/110k 支路会一直漏电。
-    gpio_set_level(framefolio::board::kBatteryAdcCtl, 0);
-    gpio_hold_en(framefolio::board::kBatteryAdcCtl);
+    gpio_set_level(lumenfolio::board::kBatteryAdcCtl, 0);
+    gpio_hold_en(lumenfolio::board::kBatteryAdcCtl);
 
     // WS2812 是单线锁存器件，数据脚浮空时容易被干扰点亮；压到低电平再保持。
-    gpio_set_direction(framefolio::board::kLedWs2812, GPIO_MODE_OUTPUT);
-    gpio_set_level(framefolio::board::kLedWs2812, 0);
-    gpio_hold_en(framefolio::board::kLedWs2812);
+    gpio_set_direction(lumenfolio::board::kLedWs2812, GPIO_MODE_OUTPUT);
+    gpio_set_level(lumenfolio::board::kLedWs2812, 0);
+    gpio_hold_en(lumenfolio::board::kLedWs2812);
 
     gpio_deep_sleep_hold_en();
 
@@ -104,11 +104,11 @@ void framefolio::board_sleep::enter(uint32_t timer_seconds)
     esp_deep_sleep_start();
 }
 
-void framefolio::board_sleep::release_holds()
+void lumenfolio::board_sleep::release_holds()
 {
     // 顺序无所谓：先把深睡的全局保持关掉，再逐个解开。
     gpio_deep_sleep_hold_dis();
-    gpio_hold_dis(framefolio::board::kPeriphPowerEn);
-    gpio_hold_dis(framefolio::board::kBatteryAdcCtl);
-    gpio_hold_dis(framefolio::board::kLedWs2812);
+    gpio_hold_dis(lumenfolio::board::kPeriphPowerEn);
+    gpio_hold_dis(lumenfolio::board::kBatteryAdcCtl);
+    gpio_hold_dis(lumenfolio::board::kLedWs2812);
 }

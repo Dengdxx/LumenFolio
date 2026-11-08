@@ -8,7 +8,7 @@ import (
 	"math"
 	"testing"
 
-	"framefolio/panel"
+	"lumenfolio/panel"
 	"gioui.org/f32"
 	"gioui.org/io/pointer"
 )

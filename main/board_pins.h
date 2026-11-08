@@ -11,7 +11,7 @@
  * 只描述电气连接与有效电平，不含驱动逻辑。驱动不得另行写死 GPIO 编号。
  * @note 改引脚必须先改原理图，再改这里。
  */
-namespace framefolio::board {
+namespace lumenfolio::board {
 
 // ───────────── 墨水屏 EPD：SPI（CS0/CS1 主从片选） ─────────────
 // 引脚真值在驱动组件的 epd709_pins.h 里（驱动内部也直接用它），这里只做别名，避免两处各自维护。
@@ -76,4 +76,4 @@ inline constexpr gpio_num_t kBoot   = GPIO_NUM_0;   // BOOT 键
 // ───────────── 原理图上未连接的脚 ─────────────
 // GPIO35 / GPIO36 / GPIO37 / GPIO45 / GPIO46 悬空（原理图打叉）
 
-}  // namespace framefolio::board
+}  // namespace lumenfolio::board

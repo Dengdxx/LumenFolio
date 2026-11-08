@@ -85,11 +85,11 @@ esp_err_t board_power_init()
     adc_oneshot_chan_cfg_t channel = {};
     channel.atten    = ADC_ATTEN_DB_12;
     channel.bitwidth = ADC_BITWIDTH_DEFAULT;
-    ESP_RETURN_ON_ERROR(adc_oneshot_config_channel(s_adc, framefolio::board::kBatteryChannel, &channel), kTag, "ADC 通道");
+    ESP_RETURN_ON_ERROR(adc_oneshot_config_channel(s_adc, lumenfolio::board::kBatteryChannel, &channel), kTag, "ADC 通道");
 
     adc_cali_curve_fitting_config_t cali = {};
     cali.unit_id  = ADC_UNIT_1;
-    cali.chan     = framefolio::board::kBatteryChannel;
+    cali.chan     = lumenfolio::board::kBatteryChannel;
     cali.atten    = ADC_ATTEN_DB_12;
     cali.bitwidth = ADC_BITWIDTH_DEFAULT;
     if (adc_cali_create_scheme_curve_fitting(&cali, &s_cali) != ESP_OK) {
@@ -108,19 +108,19 @@ esp_err_t board_power_read(board_power_sample_t *out)
         return ESP_ERR_INVALID_STATE;
     }
 
-    gpio_set_level(framefolio::board::kBatteryAdcCtl, 1);
+    gpio_set_level(lumenfolio::board::kBatteryAdcCtl, 1);
     vTaskDelay(pdMS_TO_TICKS(kSettleMs));
 
     int raw[kSampleCount] = {};
     esp_err_t err = ESP_OK;
     for (int i = 0; i < kSampleCount; ++i) {
-        err = adc_oneshot_read(s_adc, framefolio::board::kBatteryChannel, &raw[i]);
+        err = adc_oneshot_read(s_adc, lumenfolio::board::kBatteryChannel, &raw[i]);
         if (err != ESP_OK) {
             break;
         }
     }
     // 采样结束立刻断开分压，别让这条支路一直漏电。
-    gpio_set_level(framefolio::board::kBatteryAdcCtl, 0);
+    gpio_set_level(lumenfolio::board::kBatteryAdcCtl, 0);
     if (err != ESP_OK) {
         ESP_LOGE(kTag, "ADC 读取失败：%s", esp_err_to_name(err));
         return err;
@@ -139,12 +139,12 @@ esp_err_t board_power_read(board_power_sample_t *out)
         pin_mv = static_cast<int>(static_cast<int64_t>(code) * 3100 / 4095);
     }
 
-    out->millivolts = pin_mv * static_cast<int>(framefolio::board::kBatteryDividerNum) /
-                      static_cast<int>(framefolio::board::kBatteryDividerDen);
+    out->millivolts = pin_mv * static_cast<int>(lumenfolio::board::kBatteryDividerNum) /
+                      static_cast<int>(lumenfolio::board::kBatteryDividerDen);
     out->percent = voltage_to_percent(out->millivolts);
 
-    const bool charging = gpio_get_level(framefolio::board::kPowerChgStat) == framefolio::board::kChargeActiveLevel;
-    const bool full     = gpio_get_level(framefolio::board::kPowerFullStat) == framefolio::board::kChargeActiveLevel;
+    const bool charging = gpio_get_level(lumenfolio::board::kPowerChgStat) == lumenfolio::board::kChargeActiveLevel;
+    const bool full     = gpio_get_level(lumenfolio::board::kPowerFullStat) == lumenfolio::board::kChargeActiveLevel;
     out->charge = charging ? BOARD_CHARGE_CHARGING
                 : full     ? BOARD_CHARGE_FULL
                            : BOARD_CHARGE_IDLE;

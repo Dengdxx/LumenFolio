@@ -24,9 +24,9 @@ struct key_route {
 };
 
 constexpr key_route kRoutes[kKeyCount] = {
-    {framefolio::board::kKey1, BOARD_KEY_PREV},
-    {framefolio::board::kKey2, BOARD_KEY_NEXT},
-    {framefolio::board::kKey3, BOARD_KEY_AUX},
+    {lumenfolio::board::kKey1, BOARD_KEY_PREV},
+    {lumenfolio::board::kKey2, BOARD_KEY_NEXT},
+    {lumenfolio::board::kKey3, BOARD_KEY_AUX},
 };
 
 QueueHandle_t s_queue;

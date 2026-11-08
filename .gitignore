@@ -19,11 +19,11 @@ Thumbs.db
 # ESP-IDF 生成物（配置真值在 sdkconfig.defaults）
 sdkconfig
 
-# FrameFolio 的编译产物、截图和本地调试脚本
-framefolio/FrameFolio.exe
-framefolio/*.log
-framefolio/*.png
-framefolio/*.ps1
+# LumenFolio 的编译产物、截图和本地调试脚本
+lumenfolio/LumenFolio.exe
+lumenfolio/*.log
+lumenfolio/*.png
+lumenfolio/*.ps1
 
 # 编辑器/语言服务缓存
 .cache/

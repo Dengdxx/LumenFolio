@@ -11,7 +11,7 @@ import (
 	"gioui.org/op"
 	"gioui.org/unit"
 
-	"framefolio/panel"
+	"lumenfolio/panel"
 )
 
 func TestPreviewFitsWholeImage(t *testing.T) {

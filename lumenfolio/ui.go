@@ -30,7 +30,7 @@ import (
 	"gioui.org/widget/material"
 	"gioui.org/x/explorer"
 
-	"framefolio/panel"
+	"lumenfolio/panel"
 )
 
 // 界面用的颜色。墨水的预览色另见 inks，不从这里取。
@@ -66,7 +66,7 @@ func runGUI(initialFile string) int {
 	ui := newUI(shaper, initialFile)
 	go func() {
 		w := new(app.Window)
-		w.Option(app.Title("FrameFolio"), app.Size(unit.Dp(1180), unit.Dp(760)), app.MinSize(unit.Dp(900), unit.Dp(600)))
+		w.Option(app.Title("LumenFolio"), app.Size(unit.Dp(1180), unit.Dp(760)), app.MinSize(unit.Dp(900), unit.Dp(600)))
 		if err := ui.run(w); err != nil {
 			log.Fatal(err)
 		}

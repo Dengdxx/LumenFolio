@@ -13,7 +13,7 @@ import (
 	"gioui.org/text"
 	"gioui.org/unit"
 
-	"framefolio/panel"
+	"lumenfolio/panel"
 )
 
 func newTestUI() *ui {

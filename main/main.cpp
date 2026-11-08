@@ -34,7 +34,7 @@
 
 namespace {
 
-constexpr const char *kTag = "FrameFolio";
+constexpr const char *kTag = "LumenFolio";
 
 // 温湿度采样周期。上板验证用 5 s，方便对着传感器确认响应。
 constexpr uint32_t kEnvPollMs = 5000;
@@ -56,7 +56,7 @@ bool s_plugged;
 enum class display_state { starting, idle, busy, dead };
 display_state s_display_state = display_state::starting;
 const char *s_last_result = "-";   // 最近一次刷屏的结果，指向字符串常量
-framefolio::board_sleep::wake_info s_wake;  // 本次启动的唤醒来源，开机时填一次
+lumenfolio::board_sleep::wake_info s_wake;  // 本次启动的唤醒来源，开机时填一次
 int s_frame_count;                 // 卡上帧文件数量，显示任务每次扫描后更新
 int64_t s_idle_since_us;           // 上一次有命令的时刻
 volatile bool s_sleep_requested;   // 控制台要求立刻睡
@@ -187,7 +187,7 @@ bool show_card_frame(int index, int count)
     led_fsm_suspend();   // 未初始化时返回错误，灯本来就没亮过，忽略
     board_sd_unmount();  // 让 FAT 落盘、卡退出传输态
     epdParkBus();
-    framefolio::board_sleep::enter(framefolio::board_sleep::kTimerWakeSeconds);
+    lumenfolio::board_sleep::enter(lumenfolio::board_sleep::kTimerWakeSeconds);
 }
 
 /**
@@ -659,12 +659,12 @@ void app_describe(char *buf, size_t size)
 extern "C" void app_main(void)
 {
     // 深睡会锁住一部分脚的保持位，开机第一件事先解开，否则 LED / ADC_CTL 可能一直是死的。
-    framefolio::board_sleep::release_holds();
+    lumenfolio::board_sleep::release_holds();
 
     board_gpio_init();
     s_idle_since_us = esp_timer_get_time();
 
-    s_wake = framefolio::board_sleep::wakeup();
+    s_wake = lumenfolio::board_sleep::wakeup();
     bool refresh_on_start = false;
     if (s_wake.timer) {
         // 定时唤醒只做两件事：看是不是插上了充电器；到点就补刷一张防残影。
@@ -674,9 +674,9 @@ extern "C" void app_main(void)
                                          sample.charge == BOARD_CHARGE_FULL);
         if (plugged) {
             ESP_LOGI(kTag, "定时唤醒：检测到充电器，按正常开机处理");
-        } else if (!framefolio::board_sleep::take_refresh_slot()) {
+        } else if (!lumenfolio::board_sleep::take_refresh_slot()) {
             ESP_LOGI(kTag, "定时唤醒：没有接充电器，继续睡");
-            framefolio::board_sleep::enter(framefolio::board_sleep::kTimerWakeSeconds);
+            lumenfolio::board_sleep::enter(lumenfolio::board_sleep::kTimerWakeSeconds);
         } else {
             ESP_LOGI(kTag, "定时唤醒：到了补刷时间，本次开机刷一张防残影");
             refresh_on_start = true;
@@ -730,19 +730,19 @@ extern "C" void app_main(void)
 
     ESP_LOGI(kTag, "board ready");
     ESP_LOGI(kTag, "epd   sclk=%d mosi=%d miso=%d cs0=%d cs1=%d dc=%d rst=%d busy=%d",
-             framefolio::board::kEpdSclk, framefolio::board::kEpdMosi, framefolio::board::kEpdMiso,
-             framefolio::board::kEpdCs0, framefolio::board::kEpdCs1, framefolio::board::kEpdDc,
-             framefolio::board::kEpdRst, framefolio::board::kEpdBusy);
+             lumenfolio::board::kEpdSclk, lumenfolio::board::kEpdMosi, lumenfolio::board::kEpdMiso,
+             lumenfolio::board::kEpdCs0, lumenfolio::board::kEpdCs1, lumenfolio::board::kEpdDc,
+             lumenfolio::board::kEpdRst, lumenfolio::board::kEpdBusy);
     ESP_LOGI(kTag, "sd    clk=%d cmd=%d d0=%d d1=%d d2=%d d3=%d cd=%d",
-             framefolio::board::kSdClk, framefolio::board::kSdCmd, framefolio::board::kSdD0,
-             framefolio::board::kSdD1, framefolio::board::kSdD2, framefolio::board::kSdD3,
-             framefolio::board::kSdCardDetect);
+             lumenfolio::board::kSdClk, lumenfolio::board::kSdCmd, lumenfolio::board::kSdD0,
+             lumenfolio::board::kSdD1, lumenfolio::board::kSdD2, lumenfolio::board::kSdD3,
+             lumenfolio::board::kSdCardDetect);
     ESP_LOGI(kTag, "keys  %d %d %d | led=%d | i2c sda=%d scl=%d",
-             framefolio::board::kKey1, framefolio::board::kKey2, framefolio::board::kKey3,
-             framefolio::board::kLedWs2812, framefolio::board::kI2cSda, framefolio::board::kI2cScl);
+             lumenfolio::board::kKey1, lumenfolio::board::kKey2, lumenfolio::board::kKey3,
+             lumenfolio::board::kLedWs2812, lumenfolio::board::kI2cSda, lumenfolio::board::kI2cScl);
     ESP_LOGI(kTag, "pwr   en=%d adc=%d ctl=%d chg=%d full=%d",
-             framefolio::board::kPeriphPowerEn, framefolio::board::kBatteryAdc, framefolio::board::kBatteryAdcCtl,
-             framefolio::board::kPowerChgStat, framefolio::board::kPowerFullStat);
+             lumenfolio::board::kPeriphPowerEn, lumenfolio::board::kBatteryAdc, lumenfolio::board::kBatteryAdcCtl,
+             lumenfolio::board::kPowerChgStat, lumenfolio::board::kPowerFullStat);
 
     // 刷屏命令共用一条队列：按键、串口控制台、HTTP 控制台。
     s_cmds = xQueueCreate(8, sizeof(display_cmd));

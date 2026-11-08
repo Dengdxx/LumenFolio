@@ -133,7 +133,7 @@ esp_err_t board_led_init(void)
     }
 
     rmt_tx_channel_config_t channel = {
-        .gpio_num = framefolio::board::kLedWs2812,
+        .gpio_num = lumenfolio::board::kLedWs2812,
         .clk_src = RMT_CLK_SRC_DEFAULT,
         .resolution_hz = kResolutionHz,
         .mem_block_symbols = 64,

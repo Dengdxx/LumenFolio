@@ -27,7 +27,7 @@ type otaStatus struct {
 	Phase            string `json:"phase"`             // 设备 OTA 状态机阶段，如 idle、reboot_pending、rollback_failed
 	Ready            bool   `json:"ready"`             // 基础启动和自检流程已返回，不代表传感器全部正常或通过飞行验证
 	PendingVerify    bool   `json:"pending_verify"`    // 新固件是否等待确认
-	Project          string `json:"project"`           // 工程名，应为 framefilm
+	Project          string `json:"project"`           // 工程名，应为 LumenFolio
 	Version          string `json:"version"`           // 固件版本
 	ImageID          string `json:"image_id"`          // app_elf_sha256 的 256 位标识，64 个十六进制字符
 	RunningPartition string `json:"running_partition"` // 当前运行槽
@@ -59,7 +59,7 @@ type otaImage struct {
 // IDF 的应用描述位于首个 segment 开头：24 字节镜像头 + 8 字节 segment 头。
 // 完整校验留给设备 SDK；这里仅提取项目/版本等信息供上传校验和重启后的确认使用。
 // 文件必须是普通 ESP-IDF 应用镜像（首字节 0xe9、描述魔数 0xabcd5432），
-// 且工程为 framefilm、版本非空且不含非法 HTTP 头字符。
+// 且工程为 LumenFolio、版本非空且不含非法 HTTP 头字符。
 func readOTAImage(file *os.File) (otaImage, error) {
 	info, err := file.Stat()
 	if err != nil {
@@ -73,7 +73,7 @@ func readOTAImage(file *os.File) (otaImage, error) {
 		return otaImage{}, fmt.Errorf("读取应用镜像头: %w", err)
 	}
 	if prefix[0] != 0xe9 || binary.LittleEndian.Uint32(prefix[32:36]) != 0xabcd5432 {
-		return otaImage{}, errors.New("不是 ESP-IDF 应用镜像；请使用 app.bin，不能使用 bootloader 或合并镜像")
+		return otaImage{}, errors.New("不是 ESP-IDF 应用镜像；请使用 LumenFolio.bin，不能使用 bootloader 或合并镜像")
 	}
 	field := func(value []byte) string {
 		if index := bytes.IndexByte(value, 0); index >= 0 {
@@ -83,8 +83,8 @@ func readOTAImage(file *os.File) (otaImage, error) {
 	}
 	image := otaImage{Version: field(prefix[48:80]), Project: field(prefix[80:112]),
 		ImageID: hex.EncodeToString(prefix[176:208]), Size: info.Size()}
-	if image.Project != "framefilm" || image.Version == "" {
-		return otaImage{}, errors.New("镜像必须属于 framefilm，且包含版本信息")
+	if image.Project != "LumenFolio" || image.Version == "" {
+		return otaImage{}, errors.New("镜像必须属于 LumenFolio，且包含版本信息")
 	}
 	for _, value := range []byte(image.Version) {
 		if value < 32 || value == 127 {
@@ -271,7 +271,7 @@ func Run(ctx context.Context, host string, args []string, out, errOut io.Writer)
 		return 2
 	}
 	if flags.NArg() != 1 || *port < 1 || *port > 65535 || *uploadTimeout <= 0 || *waitTimeout <= 0 {
-		fmt.Fprintln(errOut, "用法：FrameFolio --host IP ota [选项] 应用.bin|status")
+		fmt.Fprintln(errOut, "用法：LumenFolio --host IP ota [选项] 应用.bin|status")
 		return 2
 	}
 	base := "http://" + net.JoinHostPort(host, strconv.Itoa(*port))
@@ -306,7 +306,7 @@ func Run(ctx context.Context, host string, args []string, out, errOut io.Writer)
 		return fail(err)
 	}
 	if status.Project != image.Project {
-		return fail(errors.New("设备与镜像项目不匹配"))
+		return fail(fmt.Errorf("设备工程名 %q 与镜像工程名 %q 不一致", status.Project, image.Project))
 	}
 	partition := status.UpdatePartition
 	if status.PendingVerify && status.Version == image.Version && status.ImageID == image.ImageID {

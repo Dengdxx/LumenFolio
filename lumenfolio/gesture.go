@@ -7,7 +7,7 @@ import (
 	"gioui.org/f32"
 	"gioui.org/io/pointer"
 
-	"framefolio/panel"
+	"lumenfolio/panel"
 )
 
 // frameRectOnScreen 计算固定取景框在当前可用区域 viewRect 中居中且等比最大化的屏幕像素矩形。

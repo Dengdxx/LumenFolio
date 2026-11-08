@@ -9,7 +9,7 @@ import (
 	"testing"
 	"testing/synctest"
 
-	"framefolio/panel"
+	"lumenfolio/panel"
 )
 
 // waitingWindow 模拟空闲的操作系统窗口，只能由 Invalidate 唤醒。
