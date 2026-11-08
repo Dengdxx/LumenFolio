@@ -140,3 +140,25 @@ func TestDitherDeliversNewestResult(t *testing.T) {
 		}
 	})
 }
+
+func TestPreviewAndFileResultsStayIndependent(t *testing.T) {
+	u := newTestUI()
+	u.fileBusy, u.rendering = true, true
+	u.status = "选择要打开的图片"
+	preview := image.NewNRGBA(image.Rect(0, 0, 12, 16))
+	u.done <- ditherResult{img: preview}
+	if !u.applyPendingResults() || u.rendering || u.preview != preview {
+		t.Fatal("打开文件时也应显示已经算好的预览")
+	}
+	if !u.fileBusy || u.status != "选择要打开的图片" {
+		t.Fatal("预览完成不能结束文件操作或清掉选择提示")
+	}
+
+	// Gio 可能把读图与预览的唤醒合并为一帧，两项结果都必须在这一轮处理。
+	u.rendering = true
+	u.openResult <- openResult{}
+	u.done <- ditherResult{img: preview}
+	if !u.applyPendingResults() || u.fileBusy || u.rendering {
+		t.Fatal("一次唤醒应同时处理取消选择和预览完成")
+	}
+}

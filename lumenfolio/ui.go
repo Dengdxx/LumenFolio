@@ -118,15 +118,16 @@ type ui struct {
 	algButtons   []widget.Clickable
 	algList      layout.List
 
-	mode     viewMode
-	crop     panel.Crop
-	alg      int
-	rawImage image.Image  // 打开的原始图片
-	source   *image.NRGBA // 按取景框采样出的 1200×1600 图
-	preview  *image.NRGBA // 抖动结果
-	name     string
-	status   string
-	busy     bool
+	mode      viewMode
+	crop      panel.Crop
+	alg       int
+	rawImage  image.Image  // 打开的原始图片
+	source    *image.NRGBA // 按取景框采样出的 1200×1600 图
+	preview   *image.NRGBA // 抖动结果
+	name      string
+	status    string
+	rendering bool // 当前构图和算法的六色预览正在计算
+	fileBusy  bool // 打开、上传和导出互斥，由 UI 事件循环维护
 
 	// 交互状态
 	canvasTag bool
@@ -187,6 +188,8 @@ func (u *ui) run(w *app.Window) error {
 	u.window = w
 	u.explorer = explorer.NewExplorer(w)
 	if u.initialFile != "" {
+		u.fileBusy = true
+		u.status = "正在打开图片"
 		go func(path string) {
 			f, err := os.Open(path)
 			if err != nil {
@@ -198,9 +201,31 @@ func (u *ui) run(w *app.Window) error {
 	}
 	var ops op.Ops
 	for {
+		if u.applyPendingResults() {
+			w.Invalidate()
+		}
+		evt := w.Event()
+		u.explorer.ListenEvents(evt)
+		switch evt := evt.(type) {
+		case app.DestroyEvent:
+			return evt.Err
+		case app.FrameEvent:
+			// 文件选择可能在等待这个鼠标帧时结束，先应用结果再派发点击。
+			u.applyPendingResults()
+			gtx := app.NewContext(&ops, evt)
+			u.layout(gtx)
+			evt.Frame(gtx.Ops)
+		}
+	}
+}
+
+// applyPendingResults 由窗口事件循环消费后台结果。多次唤醒可能合并为一帧，等待窗口事件前取完就绪结果。
+func (u *ui) applyPendingResults() (changed bool) {
+	for {
 		select {
 		case result := <-u.openResult:
-			u.busy = false
+			u.fileBusy = false
+			changed = true
 			switch {
 			case result.err != nil:
 				u.status = "没打开图片：" + result.err.Error()
@@ -215,36 +240,25 @@ func (u *ui) run(w *app.Window) error {
 				u.rawImageOpSrc = nil
 				u.triggerDither()
 			}
-			w.Invalidate()
 		case <-u.ditherReq:
 			u.triggerDither()
+			changed = true
 		case result := <-u.done:
 			if result.version == u.cropVersion && result.alg == u.alg {
-				u.busy = false
+				u.rendering = false
 				u.source = result.src
 				u.preview = result.img
-				u.status = u.name + " · " + panel.Algorithms()[u.alg].Name()
-				w.Invalidate()
+				if !u.fileBusy {
+					u.status = u.name + " · " + panel.Algorithms()[u.alg].Name()
+				}
+				changed = true
 			}
 		case text := <-u.jobResult:
-			u.busy = false
+			u.fileBusy = false
 			u.status = text
-			w.Invalidate()
+			changed = true
 		default:
-		}
-
-		evt, ok := w.Event().(event.Event)
-		if !ok {
-			return nil
-		}
-		u.explorer.ListenEvents(evt)
-		switch evt := evt.(type) {
-		case app.DestroyEvent:
-			return evt.Err
-		case app.FrameEvent:
-			gtx := app.NewContext(&ops, evt)
-			u.layout(gtx)
-			evt.Frame(gtx.Ops)
+			return changed
 		}
 	}
 }
@@ -279,8 +293,10 @@ func (u *ui) triggerDither() {
 	c := u.crop
 	img := u.rawImage
 	u.preview = nil
-	u.busy = true
-	u.status = "正在用「" + panel.Algorithms()[alg].Name() + "」采样并抖动 " + u.name
+	u.rendering = true
+	if !u.fileBusy {
+		u.status = "正在用「" + panel.Algorithms()[alg].Name() + "」采样并抖动 " + u.name
+	}
 	go func() {
 		src := c.Sample(img)
 		res := panel.Algorithms()[alg].Dither(src)
@@ -404,8 +420,12 @@ func (u *ui) section(title string) layout.Widget {
 
 func (u *ui) button(label string, clickable *widget.Clickable, action func()) layout.Widget {
 	return func(gtx layout.Context) layout.Dimensions {
-		if clickable.Clicked(gtx) {
+		// 忙碌时仍向 Gio 注册点击过滤器，避免恢复后的第一下鼠标点击丢失。
+		if clickable.Clicked(gtx) && !u.fileBusy {
 			action()
+		}
+		if u.fileBusy {
+			gtx = gtx.Disabled()
 		}
 		gtx.Constraints.Min.X = gtx.Constraints.Max.X
 		button := material.Button(u.theme, clickable, label)
@@ -431,7 +451,7 @@ func (u *ui) algorithmList(gtx layout.Context) layout.Dimensions {
 
 func (u *ui) algorithm(index int, name string) layout.Widget {
 	return func(gtx layout.Context) layout.Dimensions {
-		if u.algButtons[index].Clicked(gtx) && index != u.alg && !u.busy {
+		if u.algButtons[index].Clicked(gtx) && index != u.alg && !u.rendering && !u.fileBusy {
 			u.alg = index
 			u.triggerDither()
 		}
@@ -532,7 +552,7 @@ func (u *ui) canvasHeader(gtx layout.Context) layout.Dimensions {
 				layout.Rigid(gap(6)),
 				layout.Rigid(u.tabButton(" 🖼️ 六色预览 ", &u.modePrevBtn, u.mode == modePreview, func() {
 					u.mode = modePreview
-					if u.preview == nil && !u.busy {
+					if u.preview == nil && !u.rendering {
 						u.triggerDither()
 					}
 				})),
@@ -550,7 +570,7 @@ func (u *ui) canvasHeader(gtx layout.Context) layout.Dimensions {
 					if u.mode == modeCrop {
 						if u.toPreviewBtn.Clicked(gtx) {
 							u.mode = modePreview
-							if u.preview == nil && !u.busy {
+							if u.preview == nil && !u.rendering {
 								u.triggerDither()
 							}
 						}
@@ -821,7 +841,7 @@ func (u *ui) picture(gtx layout.Context) layout.Dimensions {
 	return layout.UniformInset(unit.Dp(24)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 		if u.preview == nil {
 			message := "还没有图片"
-			if u.busy {
+			if u.rendering {
 				message = "正在采样并计算抖动…"
 			}
 			label := material.H6(u.theme, message)
@@ -876,9 +896,11 @@ func (u *ui) statusBar(gtx layout.Context) layout.Dimensions {
 }
 
 func (u *ui) onOpen() {
-	if u.busy {
+	if u.fileBusy {
 		return
 	}
+	u.fileBusy = true
+	u.status = "选择要打开的图片"
 	go func() {
 		file, err := u.explorer.ChooseFile(".png", ".jpg", ".jpeg")
 		switch {
@@ -945,10 +967,10 @@ func (u *ui) onUpload() {
 		u.status = "先填写相框地址"
 		return
 	}
-	if u.busy {
+	if u.fileBusy {
 		return
 	}
-	u.busy = true
+	u.fileBusy = true
 	u.status = "正在把当前构图发到 " + host
 	alg, crop, src := u.alg, u.crop, u.rawImage
 	go func() {
@@ -966,10 +988,10 @@ func (u *ui) onExport() {
 		u.status = "先打开一张图片"
 		return
 	}
-	if u.explorer == nil || u.busy {
+	if u.explorer == nil || u.fileBusy {
 		return
 	}
-	u.busy = true
+	u.fileBusy = true
 	u.status = "选择帧文件的保存位置"
 	alg, crop, src := u.alg, u.crop, u.rawImage
 	go func() {

@@ -3,6 +3,7 @@ package main
 import (
 	"image"
 	"testing"
+	"testing/synctest"
 
 	"gioui.org/f32"
 	"gioui.org/font/gofont"
@@ -146,32 +147,57 @@ func TestModeTabsRespondToPointer(t *testing.T) {
 	}
 }
 
-func TestOpenButtonReceivesClickInPreview(t *testing.T) {
-	u := newTestUI()
-	u.rawImage = image.NewNRGBA(image.Rect(0, 0, 120, 160))
-	u.mode = modePreview
-	var opened int
-	u.openResult = make(chan openResult, 1)
-	var r input.Router
-	var ops op.Ops
-	gtx := layout.Context{Ops: &ops, Source: r.Source(), Metric: unit.Metric{PxPerDp: 1, PxPerSp: 1}, Constraints: layout.Exact(image.Pt(1180, 760))}
-	frame := func() {
-		ops.Reset()
-		u.layout(gtx)
-		r.Frame(&ops)
-	}
-	frame()
-	r.Queue(
-		pointer.Event{Kind: pointer.Press, Source: pointer.Mouse, Buttons: pointer.ButtonPrimary, Position: f32.Pt(124, 80)},
-		pointer.Event{Kind: pointer.Release, Source: pointer.Mouse, Position: f32.Pt(124, 80)},
-	)
-	frame()
-	select {
-	case <-u.openResult:
-		opened++
-	default:
-	}
-	if opened != 1 {
-		t.Fatalf("预览界面中打开按钮应收到 1 次点击，实际 %d", opened)
+func TestOpenButtonReceivesClick(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		mode        viewMode
+		rendering   bool
+		justClosing bool
+	}{
+		{name: "预览空闲", mode: modePreview},
+		{name: "预览中重算", mode: modePreview, rendering: true},
+		{name: "取景中重算", mode: modeCrop, rendering: true},
+		{name: "取消选择后立即重开", mode: modePreview, justClosing: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				u := newTestUI()
+				u.rawImage = image.NewNRGBA(image.Rect(0, 0, 120, 160))
+				u.crop = panel.NewCrop(u.rawImage.Bounds())
+				u.mode = tc.mode
+				if tc.rendering {
+					u.triggerDither()
+				}
+				var r input.Router
+				var ops op.Ops
+				gtx := layout.Context{Ops: &ops, Source: r.Source(), Metric: unit.Metric{PxPerDp: 1, PxPerSp: 1}, Constraints: layout.Exact(image.Pt(1180, 760))}
+				frame := func() {
+					ops.Reset()
+					u.layout(gtx)
+					r.Frame(&ops)
+				}
+				frame()
+				if tc.justClosing {
+					u.fileBusy = true
+					frame()
+					frame()
+					u.openResult <- openResult{}
+				}
+				at := f32.Pt(124, 80)
+				r.Queue(pointer.Event{Kind: pointer.Press, Source: pointer.Mouse, Buttons: pointer.ButtonPrimary, Position: at})
+				if tc.justClosing {
+					u.applyPendingResults()
+				}
+				frame()
+				r.Queue(pointer.Event{Kind: pointer.Release, Source: pointer.Mouse, Position: at})
+				frame()
+				synctest.Wait()
+				select {
+				case <-u.openResult:
+				default:
+					t.Fatal("点击打开图片后没有请求文件选择器")
+				}
+			})
+		})
 	}
 }
