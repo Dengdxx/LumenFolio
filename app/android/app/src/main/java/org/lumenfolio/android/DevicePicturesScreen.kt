@@ -20,6 +20,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.FilterChip
@@ -34,6 +35,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
@@ -52,6 +54,7 @@ import java.io.IOException
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -238,6 +241,8 @@ internal fun DevicePicturesScreen(
 
 @Composable
 private fun DevicePicturePreview(request: PictureListRequest, picture: DevicePicture, onDismiss: () -> Unit) {
+    val scope = rememberCoroutineScope()
+    var display by remember(request, picture.id) { mutableStateOf<PictureRead<Unit>?>(null) }
     val result = readPicture(picture.id) {
         val png = Mobilepanel.previewDevicePicture(request.host, request.source.id, picture.id)
         BitmapFactory.decodeByteArray(png, 0, png.size)
@@ -245,20 +250,55 @@ private fun DevicePicturePreview(request: PictureListRequest, picture: DevicePic
     }
 
     AlertDialog(
-        onDismissRequest = onDismiss,
+        onDismissRequest = { if (display != PictureRead.Loading) onDismiss() },
         title = { Text(picture.name, maxLines = 2, overflow = TextOverflow.Ellipsis) },
         text = {
-            when (result) {
-                PictureRead.Loading -> PictureLoading("正在读取图片…")
-                is PictureRead.Failure -> PictureMessage("读取图片失败：${result.message}", error = true)
-                is PictureRead.Success -> Image(
-                    bitmap = result.value.asImageBitmap(),
-                    contentDescription = picture.name,
-                    modifier = Modifier.fillMaxWidth().heightIn(max = 480.dp),
-                )
+            Column(
+                modifier = Modifier.verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                when (result) {
+                    PictureRead.Loading -> PictureLoading("正在读取图片…")
+                    is PictureRead.Failure -> PictureMessage("读取图片失败：${result.message}", error = true)
+                    is PictureRead.Success -> Image(
+                        bitmap = result.value.asImageBitmap(),
+                        contentDescription = picture.name,
+                        modifier = Modifier.fillMaxWidth().heightIn(max = 480.dp),
+                    )
+                }
+                when (val state = display) {
+                    null -> Unit
+                    PictureRead.Loading -> PictureLoading("正在提交显示请求…")
+                    is PictureRead.Success -> PictureMessage("已安排显示，屏幕刷新约需 35 秒。")
+                    is PictureRead.Failure -> PictureMessage("显示请求失败：${state.message}", error = true)
+                }
             }
         },
-        confirmButton = { TextButton(onClick = onDismiss) { Text("关闭") } },
+        confirmButton = {
+            TextButton(
+                enabled = display == null || display is PictureRead.Failure,
+                onClick = {
+                    if (display == null || display is PictureRead.Failure) {
+                        display = PictureRead.Loading
+                        scope.launch {
+                            display = try {
+                                withContext(Dispatchers.IO) {
+                                    Mobilepanel.displayDevicePicture(request.host, request.source.id, picture.id)
+                                }
+                                PictureRead.Success(Unit)
+                            } catch (error: CancellationException) {
+                                throw error
+                            } catch (error: Exception) {
+                                PictureRead.Failure(error.localizedMessage ?: "请确认相框已唤醒且地址正确。")
+                            }
+                        }
+                    }
+                },
+            ) { Text("在相框上显示") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss, enabled = display != PictureRead.Loading) { Text("关闭") }
+        },
     )
 }
 

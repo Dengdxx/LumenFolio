@@ -12,11 +12,12 @@ namespace {
 
 enum class frame_source { invalid, artifacts, sd };
 
-constexpr struct {
+struct frame_slot {
     const char *id;
     const char *name;
     bool inbox;
-} kSlots[] = {{"boot", "开机画面", false}, {"inbox", "上传画面", true}};
+};
+constexpr frame_slot kSlots[] = {{"boot", "开机画面", false}, {"inbox", "上传画面", true}};
 
 // 同步 HTTP handler 独占，复用缓冲而不占显示任务的 PSRAM 或 httpd 的栈。
 board_sd_frame_names s_sd_names;
@@ -28,6 +29,16 @@ public:
     FrameTransfer() { app_frame_transfer_begin(); }
     ~FrameTransfer() { app_frame_transfer_end(); }
 };
+
+const frame_slot *find_slot(const char *id)
+{
+    for (const auto &slot : kSlots) {
+        if (strcmp(id, slot.id) == 0) {
+            return &slot;
+        }
+    }
+    return nullptr;
+}
 
 int hex_digit(char ch)
 {
@@ -209,15 +220,13 @@ esp_err_t handle_frame_download(httpd_req_t *request)
     if (from_sd) {
         err = board_sd_browse_open(id, size);
     } else {
-        for (const auto &slot : kSlots) {
-            if (strcmp(id, slot.id) == 0) {
-                inbox = slot.inbox;
-                err = artifacts_frame_size(inbox, &size);
-                break;
-            }
+        const auto *slot = find_slot(id);
+        if (slot != nullptr) {
+            inbox = slot->inbox;
+            err = artifacts_frame_size(inbox, &size);
         }
     }
-    if (err == ESP_ERR_NOT_FOUND) {
+    if (err == ESP_ERR_NOT_FOUND || err == ESP_ERR_INVALID_ARG) {
         return httpd_resp_send_err(request, HTTPD_404_NOT_FOUND, "画面不存在");
     }
     if (err != ESP_OK) {
@@ -242,6 +251,46 @@ esp_err_t handle_frame_download(httpd_req_t *request)
     return err == ESP_OK ? httpd_resp_send_chunk(request, nullptr, 0) : ESP_FAIL;
 }
 
+/** @brief POST /frame/display 验证选中来源并排队，由显示任务读取原件和刷屏。 */
+esp_err_t handle_frame_display(httpd_req_t *request)
+{
+    encoded_id id;
+    const frame_source source = parse_query(request, &id);
+    if (source == frame_source::invalid || request->content_len != 0) {
+        return httpd_resp_send_err(request, HTTPD_400_BAD_REQUEST, "需要有效的 source 和 id，且请求体须为空");
+    }
+    const FrameTransfer transfer;
+    size_t size;
+    esp_err_t err = ESP_ERR_NOT_FOUND;
+    display_cmd cmd = display_cmd::pick_sd;
+    if (source == frame_source::sd) {
+        err = board_sd_browse_open(id, size);
+        if (err == ESP_OK) board_sd_browse_close();
+    } else {
+        const auto *slot = find_slot(id);
+        if (slot != nullptr) {
+            cmd = slot->inbox ? display_cmd::pick_inbox : display_cmd::pick_boot;
+            err = artifacts_frame_size(slot->inbox, &size);
+        }
+    }
+    if (err == ESP_ERR_INVALID_ARG) {
+        return httpd_resp_send_err(request, HTTPD_400_BAD_REQUEST, "帧文件名非法");
+    }
+    if (err == ESP_ERR_NOT_FOUND) {
+        return httpd_resp_send_err(request, HTTPD_404_NOT_FOUND, "画面不存在");
+    }
+    if (err != ESP_OK) {
+        return httpd_resp_send_err(request, HTTPD_500_INTERNAL_SERVER_ERROR, "无法读取画面");
+    }
+    httpd_resp_set_type(request, "text/plain; charset=utf-8");
+    if (app_post_display(cmd, id) != ESP_OK) {
+        httpd_resp_set_status(request, "503 Service Unavailable");
+        return httpd_resp_sendstr(request, "显示任务暂不可用或队列已满\n");
+    }
+    httpd_resp_set_status(request, "202 Accepted");
+    return httpd_resp_sendstr(request, "画面刷新已排队\n");
+}
+
 }  // namespace
 
 esp_err_t app_register_frame_browse()
@@ -250,6 +299,7 @@ esp_err_t app_register_frame_browse()
         {.uri = "/frames", .method = HTTP_GET, .handler = handle_frame_list, .user_ctx = nullptr},
         {.uri = "/frames/storage", .method = HTTP_GET, .handler = handle_frame_storage, .user_ctx = nullptr},
         {.uri = "/frame", .method = HTTP_GET, .handler = handle_frame_download, .user_ctx = nullptr},
+        {.uri = "/frame/display", .method = HTTP_POST, .handler = handle_frame_display, .user_ctx = nullptr},
     };
     for (const auto &route : routes) {
         const esp_err_t err = otaServiceRegisterHandler(&route);

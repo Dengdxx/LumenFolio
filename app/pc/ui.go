@@ -666,6 +666,8 @@ func (u *ui) tabButton(label string, clickable *widget.Clickable, active bool, a
 			bg, fg, border := u.colors.surface, u.colors.muted, u.colors.outline
 			if active {
 				bg, fg, border = u.colors.selected, u.colors.onSelected, color.NRGBA{}
+			} else if !gtx.Enabled() {
+				border = u.colors.divider
 			} else if clickable.Hovered() {
 				bg = u.colors.field
 			}

@@ -265,6 +265,20 @@ esp_err_t board_sd_frame_at(int index, char *path, size_t size)
     return ESP_OK;
 }
 
+int board_sd_frame_index(const char *name)
+{
+    std::lock_guard lock(s_sd_mutex);
+    if (s_card != nullptr) {
+        const int count = collect_frames(s_display_frames);
+        for (int i = 0; i < count; ++i) {
+            if (strcasecmp(s_display_frames[i], name) == 0) {
+                return i;
+            }
+        }
+    }
+    return -1;
+}
+
 esp_err_t board_sd_browse_frames(board_sd_frame_names &names, int &count)
 {
     std::lock_guard lock(s_sd_mutex);
@@ -292,8 +306,11 @@ esp_err_t board_sd_browse_frames(board_sd_frame_names &names, int &count)
 
 esp_err_t board_sd_browse_open(const char *name, size_t &size)
 {
+    if (!is_frame_name(name)) {
+        return ESP_ERR_INVALID_ARG;
+    }
     std::lock_guard lock(s_sd_mutex);
-    if (s_card == nullptr || !is_frame_name(name)) {
+    if (s_card == nullptr) {
         return ESP_ERR_NOT_FOUND;
     }
     s_browse_file = open_browse_frame(name, size);

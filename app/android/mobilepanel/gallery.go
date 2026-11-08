@@ -50,6 +50,11 @@ func ThumbnailDevicePicture(host, source, id string) ([]byte, error) {
 	return encodePreview(pixels)
 }
 
+// DisplayDevicePicture 请求显示选中的画面，成功表示设备已安排刷新。
+func DisplayDevicePicture(host, source, id string) error {
+	return gallery.Display(context.Background(), host, devicePort, gallery.Source(source), id)
+}
+
 // StorageInfo 持有一次读取返回的两种存储容量，由 Android 按来源显示。
 type StorageInfo struct {
 	usage gallery.StorageUsage

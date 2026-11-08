@@ -25,24 +25,27 @@ type galleryBrowser struct {
 	flashButton   widget.Clickable
 	sdButton      widget.Clickable
 	refreshButton widget.Clickable
+	displayButton widget.Clickable
 	buttons       []widget.Clickable
 	list          layout.List
 
-	host         string
-	source       gallery.Source
-	pictures     []gallery.Picture
-	thumbnails   map[string]paint.ImageOp
-	selected     string
-	preview      paint.ImageOp
-	err          error
-	request      context.Context
-	kind         galleryRequestKind
-	cancel       context.CancelFunc
-	results      chan galleryResult
-	storage      gallery.StorageUsage
-	deviceStatus string
-	infoRequest  context.Context
-	cancelInfo   context.CancelFunc
+	host          string
+	source        gallery.Source
+	pictures      []gallery.Picture
+	thumbnails    map[string]paint.ImageOp
+	selected      string
+	preview       paint.ImageOp
+	err           error
+	displayStatus string
+	displayError  bool
+	request       context.Context
+	kind          galleryRequestKind
+	cancel        context.CancelFunc
+	results       chan galleryResult
+	storage       gallery.StorageUsage
+	deviceStatus  string
+	infoRequest   context.Context
+	cancelInfo    context.CancelFunc
 }
 
 type galleryRequestKind uint8
@@ -50,6 +53,7 @@ type galleryRequestKind uint8
 const (
 	galleryRead galleryRequestKind = iota
 	galleryThumbnail
+	galleryDisplay
 )
 
 type galleryResult struct {
@@ -94,6 +98,7 @@ func (u *ui) loadGallery(source gallery.Source) {
 	g.thumbnails = nil
 	g.selected = ""
 	g.preview, g.err = paint.ImageOp{}, nil
+	g.displayStatus, g.displayError = "", false
 	g.list = layout.List{Axis: layout.Vertical}
 	host := g.host
 	u.startGalleryRequest(func(ctx context.Context) galleryResult {
@@ -106,6 +111,7 @@ func (u *ui) loadGalleryPreview(id string) {
 	g := &u.gallery
 	g.selected = id
 	g.preview, g.err = paint.ImageOp{}, nil
+	g.displayStatus, g.displayError = "", false
 	host, source := g.host, g.source
 	u.startGalleryRequest(func(ctx context.Context) galleryResult {
 		img, err := gallery.Preview(ctx, host, 8080, source, id)
@@ -116,7 +122,7 @@ func (u *ui) loadGalleryPreview(id string) {
 	})
 }
 
-// loadVisibleThumbnail 在列表完成布局后按可见范围串行读取，给主动打开的预览让路。
+// loadVisibleThumbnail 在列表完成布局后按可见范围串行读取，给主动打开的预览和刷屏让路。
 func (u *ui) loadVisibleThumbnail() {
 	g := &u.gallery
 	if g.request != nil {
@@ -138,6 +144,20 @@ func (u *ui) loadVisibleThumbnail() {
 		g.kind = galleryThumbnail
 		return
 	}
+}
+
+func (u *ui) displayGalleryPicture() {
+	g := &u.gallery
+	if g.selected == "" || g.preview.Size().X == 0 || g.kind == galleryDisplay {
+		return
+	}
+	host, source, id := g.host, g.source, g.selected
+	g.displayStatus, g.displayError = "正在安排显示…", false
+	u.startGalleryRequest(func(ctx context.Context) galleryResult {
+		return galleryResult{err: gallery.Display(ctx, host, 8080, source, id)}
+	})
+	g.kind = galleryDisplay
+	u.window.Invalidate()
 }
 
 // loadGalleryInfo 读取容量和设备状态。两项各自处理错误，并独立于图片列表更新。
@@ -208,6 +228,14 @@ func (g *galleryBrowser) applyResult(result galleryResult) {
 		// 失败的条目保留占位，等刷新时重试，避免每一帧都重新发请求。
 		g.thumbnails[result.id] = result.preview
 		return
+	case galleryDisplay:
+		g.displayError = result.err != nil
+		if g.displayError {
+			g.displayStatus = "安排显示失败：" + result.err.Error()
+		} else {
+			g.displayStatus = "已安排显示，屏幕刷新约需 35 秒"
+		}
+		return
 	}
 	g.err = result.err
 	if g.selected != "" {
@@ -220,6 +248,10 @@ func (g *galleryBrowser) applyResult(result galleryResult) {
 }
 
 func (u *ui) galleryLayout(gtx layout.Context) layout.Dimensions {
+	// 保留正在提交的目标，等相框返回后再允许切换来源或图片。
+	if u.gallery.kind == galleryDisplay {
+		gtx = gtx.Disabled()
+	}
 	return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			return u.card(gtx, u.galleryHeader)
@@ -335,7 +367,11 @@ func (u *ui) galleryPreview(gtx layout.Context) layout.Dimensions {
 	g := &u.gallery
 	return layout.UniformInset(unit.Dp(24)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 		if g.preview.Size().X > 0 {
-			return framePicture(gtx, g.preview)
+			return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+				layout.Flexed(1, func(gtx layout.Context) layout.Dimensions { return framePicture(gtx, g.preview) }),
+				layout.Rigid(gap(12)),
+				layout.Rigid(u.galleryDisplayControls),
+			)
 		}
 		message := "选择一张图片查看预览"
 		switch {
@@ -355,5 +391,26 @@ func (u *ui) galleryPreview(gtx layout.Context) layout.Dimensions {
 		}
 		label.Alignment = text.Middle
 		return layout.Center.Layout(gtx, label.Layout)
+	})
+}
+
+func (u *ui) galleryDisplayControls(gtx layout.Context) layout.Dimensions {
+	g := &u.gallery
+	return layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+		gtx.Constraints.Max.X = min(gtx.Constraints.Max.X, gtx.Dp(320))
+		return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+			layout.Rigid(u.primaryButton("在相框上显示", &g.displayButton, u.displayGalleryPicture)),
+			layout.Rigid(gap(6)),
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				label := material.Body2(u.theme, g.displayStatus)
+				label.Color = u.colors.muted
+				if g.displayError {
+					label.Color = u.colors.error
+				}
+				label.Alignment = text.Middle
+				gtx.Constraints.Min.X = gtx.Constraints.Max.X
+				return label.Layout(gtx)
+			}),
+		)
 	})
 }

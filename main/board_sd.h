@@ -89,6 +89,9 @@ int board_sd_frame_count(void);
  */
 esp_err_t board_sd_frame_at(int index, char *path, size_t size);
 
+/** @brief 查找指定文件在翻页顺序中的序号，未找到返回 -1。 */
+int board_sd_frame_index(const char *name);
+
 /**
  * @brief 查询根目录帧文件名，按翻页顺序跳过坏帧头或截断的文件。
  * @return ESP_OK 查询成功；ESP_ERR_INVALID_STATE 未挂载；ESP_FAIL 目录读取失败。
@@ -98,6 +101,7 @@ esp_err_t board_sd_browse_frames(board_sd_frame_names &names, int &count);
 
 /**
  * @brief 打开用于 HTTP 预览的单个根目录帧，返回应发送的编码长度。
+ * @return ESP_OK 成功；ESP_ERR_INVALID_ARG 文件名非法；ESP_ERR_NOT_FOUND 帧不可读取。
  * @note 浏览接口由 HTTP 任务独占，未读完或断开连接也要调用 close。
  *       若设备开始卸载，卸载方会关闭该文件，此后 read 返回错误。
  */

@@ -1,3 +1,4 @@
+#include <atomic>
 #include <cstdarg>
 #include <cstdio>
 #include <cstdlib>
@@ -52,9 +53,9 @@ RTC_DATA_ATTR int s_frame_index;
 // 是否接着充电器。power_task 每 30 s 写一次，display_task 读，单字节不加锁。
 bool s_plugged;
 
-/** @brief 显示任务的运行状态，只给控制台的 status 命令看。 */
+/** @brief 显示任务发布的状态，供电源守护与命令入口读取。 */
 enum class display_state { starting, idle, busy, dead };
-display_state s_display_state = display_state::starting;
+std::atomic<display_state> s_display_state = display_state::starting;
 const char *s_last_result = "-";   // 最近一次刷屏的结果，指向字符串常量
 lumenfolio::board_sleep::wake_info s_wake;  // 本次启动的唤醒来源，开机时填一次
 int s_frame_count;                 // 卡上帧文件数量，显示任务每次扫描后更新
@@ -174,6 +175,33 @@ bool show_card_frame(int index, int count)
     }
     ESP_LOGI(kTag, "第 %d/%d 张：%s", index + 1, count, path);
     return present_back("画面");
+}
+
+/** @brief 队列按值保存目标，显示任务不借用 HTTP 请求缓冲。 */
+struct display_request {
+    display_cmd cmd;
+    char sd_name[BOARD_SD_FRAME_NAME_BYTES];
+};
+
+/** @brief 只刷指定来源，读取失败时保留屏幕现有画面。 */
+bool show_picked_frame(const display_request &request)
+{
+    if (request.cmd == display_cmd::pick_boot) {
+        return artifacts_draw_boot_frame() == ESP_OK && present_back("开机画面");
+    }
+    if (request.cmd == display_cmd::pick_inbox) {
+        return artifacts_draw_inbox_frame() == ESP_OK && present_back("上传画面");
+    }
+    char path[sizeof(BOARD_SD_MOUNT_POINT) + BOARD_SD_FRAME_NAME_BYTES];
+    snprintf(path, sizeof(path), "%s/%s", BOARD_SD_MOUNT_POINT, request.sd_name);
+    if (board_sd_load_frame(path) != ESP_OK || !present_back(path)) {
+        return false;
+    }
+    const int index = board_sd_frame_index(request.sd_name);
+    if (index >= 0) {
+        s_frame_index = index;
+    }
+    return true;
 }
 
 /**
@@ -491,6 +519,7 @@ void display_task(void *)
 
     // 按键队列可能为 NULL（按键初始化失败），照样要能刷屏，所以先取出来判空。
     QueueHandle_t keys = board_keys_queue();
+    display_request current_pick = {};
 
     for (;;) {
         // 不建 queue set：两个队列各自取，省掉一种能把显示任务弄死的失败路径。
@@ -513,23 +542,29 @@ void display_task(void *)
             }
         }
 
-        display_cmd cmd = display_cmd::refresh;
+        display_request request = {};
+        display_request picked = {};
         if (s_cmds == nullptr) {
             vTaskDelay(pdMS_TO_TICKS(20));
             continue;
         }
-        while (xQueueReceive(s_cmds, &cmd, pdMS_TO_TICKS(20)) == pdTRUE) {
+        while (xQueueReceive(s_cmds, &request, pdMS_TO_TICKS(20)) == pdTRUE) {
             woke = true;
-            if (cmd == display_cmd::next) {
+            if (request.cmd == display_cmd::next) {
                 ++step;
-            } else if (cmd == display_cmd::prev) {
+            } else if (request.cmd == display_cmd::prev) {
                 --step;
-            } else if (cmd == display_cmd::factory) {
+            } else if (request.cmd == display_cmd::factory) {
                 factory = true;
-            } else if (cmd == display_cmd::inbox) {
+                picked = {};
+            } else if (request.cmd == display_cmd::inbox) {
                 inbox = true;
-            } else {
+                picked = {};
+            } else if (request.cmd == display_cmd::refresh) {
                 force = true;
+            } else {
+                picked = request;
+                inbox = factory = false;
             }
         }
 
@@ -542,10 +577,24 @@ void display_task(void *)
         s_frame_count = count;
         s_display_state = display_state::busy;
 
-        if (inbox) {
+        // 同一批选图只刷最后一张，原地重刷仍读取选中的来源。
+        if (picked.cmd != display_cmd::refresh ||
+            (!inbox && !factory && step == 0 && current_pick.cmd != display_cmd::refresh)) {
+            const auto &target = picked.cmd != display_cmd::refresh ? picked : current_pick;
+            if (show_picked_frame(target)) {
+                current_pick = target;
+                s_last_result = "ok";
+            } else {
+                ESP_LOGW(kTag, "选中的画面载入或上屏失败");
+                s_last_result = "load-failed";
+                led_event_post(LED_EV_ANOMALY, 0);
+            }
+        } else if (inbox) {
             // 上传槽里的图优先于同一批里的翻页：图刚写进去，这一轮就该把它刷上屏。
             if (artifacts_draw_inbox_frame() == ESP_OK) {
-                s_last_result = present_back("上传的画面") ? "inbox" : "inbox-failed";
+                const bool shown = present_back("上传的画面");
+                s_last_result = shown ? "inbox" : "inbox-failed";
+                if (shown) current_pick = {};
             } else {
                 ESP_LOGW(kTag, "上传槽里没有可用画面");
                 s_last_result = "inbox-empty";
@@ -554,17 +603,23 @@ void display_task(void *)
         } else if (factory) {
             // 出厂画面固定来自 artifacts，不管卡上有没有帧文件。
             if (artifacts_draw_boot_frame() == ESP_OK) {
-                s_last_result = present_back("出厂画面") ? "factory" : "factory-failed";
+                const bool shown = present_back("出厂画面");
+                s_last_result = shown ? "factory" : "factory-failed";
+                if (shown) current_pick = {};
             } else {
                 ESP_LOGW(kTag, "artifacts 里没有出厂画面，改刷白屏");
                 epd_fb_clear(WHITE);
-                s_last_result = present_back("白屏") ? "factory-white" : "factory-failed";
+                const bool shown = present_back("白屏");
+                s_last_result = shown ? "factory-white" : "factory-failed";
+                if (shown) current_pick = {};
             }
         } else if (count > 0) {
             s_frame_index = ((s_frame_index + step) % count + count) % count;
             const bool shown = show_card_frame(s_frame_index, count);
             s_last_result = shown ? "ok" : "load-failed";
-            if (!shown) {
+            if (shown) {
+                current_pick = {};
+            } else {
                 ESP_LOGE(kTag, "第 %d/%d 张载入或上屏失败", s_frame_index + 1, count);
                 led_event_post(LED_EV_ANOMALY, 0);
             }
@@ -576,7 +631,9 @@ void display_task(void *)
             if (board_sd_mounted()) {
                 ESP_LOGI(kTag, "TF 卡上没有可用帧文件，改用 artifacts 里的画面");
             }
-            s_last_result = refresh_fallback() ? "fallback" : "fallback-failed";
+            const bool shown = refresh_fallback();
+            s_last_result = shown ? "fallback" : "fallback-failed";
+            if (shown) current_pick = {};
         }
         s_display_state = display_state::idle;
     }
@@ -584,12 +641,19 @@ void display_task(void *)
 
 }  // namespace
 
-esp_err_t app_post_display(display_cmd cmd)
+esp_err_t app_post_display(display_cmd cmd, const char *sd_name)
 {
-    if (s_cmds == nullptr) {
+    if (s_cmds == nullptr || s_display_state == display_state::dead) {
         return ESP_ERR_INVALID_STATE;
     }
-    return xQueueSend(s_cmds, &cmd, 0) == pdTRUE ? ESP_OK : ESP_ERR_NO_MEM;
+    display_request request = {cmd, {}};
+    if (cmd == display_cmd::pick_sd) {
+        if (sd_name == nullptr || strlen(sd_name) >= sizeof(request.sd_name)) {
+            return ESP_ERR_INVALID_ARG;
+        }
+        strcpy(request.sd_name, sd_name);
+    }
+    return xQueueSend(s_cmds, &request, 0) == pdTRUE ? ESP_OK : ESP_ERR_NO_MEM;
 }
 
 void app_request_sleep()
@@ -749,7 +813,7 @@ extern "C" void app_main(void)
              lumenfolio::board::kPowerChgStat, lumenfolio::board::kPowerFullStat);
 
     // 刷屏命令共用一条队列：按键、串口控制台、HTTP 控制台。
-    s_cmds = xQueueCreate(8, sizeof(display_cmd));
+    s_cmds = xQueueCreate(8, sizeof(display_request));
     if (s_cmds == nullptr) {
         ESP_LOGE(kTag, "命令队列创建失败");
     }
@@ -780,6 +844,7 @@ extern "C" void app_main(void)
     }
 
     if (xTaskCreate(display_task, "display", 8192, nullptr, 5, nullptr) != pdPASS) {
+        s_display_state = display_state::dead;
         ESP_LOGE(kTag, "显示任务创建失败");
     }
 

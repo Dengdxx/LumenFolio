@@ -1,4 +1,4 @@
-// Package gallery 浏览相框 Flash 和 SD 卡中的面板帧与存储信息。
+// Package gallery 浏览相框 Flash 和 SD 卡中的面板帧，并请求显示选中的画面。
 package gallery
 
 import (
@@ -66,7 +66,7 @@ var client = &http.Client{
 // List 读取指定存储的图片清单。SD 未挂载和已挂载但没有图片分别返回错误和空列表。
 func List(ctx context.Context, host string, port int, source Source) ([]Picture, error) {
 	// SD 根目录最多 32 个帧文件，JSON 同时包含 ID 与名称。
-	body, err := get(ctx, host, port, "/frames", url.Values{"source": {string(source)}}, 64*1024,
+	body, err := request(ctx, http.MethodGet, host, port, "/frames", url.Values{"source": {string(source)}}, http.StatusOK, 64*1024,
 		"相框固件暂不支持浏览图片，请更新固件")
 	if err != nil {
 		return nil, err
@@ -89,7 +89,7 @@ func List(ctx context.Context, host string, port int, source Source) ([]Picture,
 
 // Preview 读取指定存储中的一帧并解码为完整的六色预览，不修改相框画面。
 func Preview(ctx context.Context, host string, port int, source Source, id string) (*image.NRGBA, error) {
-	body, err := get(ctx, host, port, "/frame", url.Values{"source": {string(source)}, "id": {id}}, panel.FrameBytes,
+	body, err := request(ctx, http.MethodGet, host, port, "/frame", frameQuery(source, id), http.StatusOK, panel.FrameBytes,
 		"相框上已找不到这张图片，请刷新列表")
 	if err != nil {
 		return nil, err
@@ -108,9 +108,16 @@ func Thumbnail(ctx context.Context, host string, port int, source Source, id str
 	return thumb, nil
 }
 
+// Display 请求相框从指定存储读取并显示该帧。成功只表示已安排刷新。
+func Display(ctx context.Context, host string, port int, source Source, id string) error {
+	_, err := request(ctx, http.MethodPost, host, port, "/frame/display", frameQuery(source, id), http.StatusAccepted, 1024,
+		"找不到画面，或固件尚未支持显示选中的画面。请刷新列表或更新固件")
+	return err
+}
+
 // Storage 读取两种存储的容量，SD 未挂载时该项的总量为零。
 func Storage(ctx context.Context, host string, port int) (StorageUsage, error) {
-	body, err := get(ctx, host, port, "/frames/storage", nil, 1024,
+	body, err := request(ctx, http.MethodGet, host, port, "/frames/storage", nil, http.StatusOK, 1024,
 		"相框固件暂不支持读取容量")
 	if err != nil {
 		return StorageUsage{}, err
@@ -122,15 +129,19 @@ func Storage(ctx context.Context, host string, port int) (StorageUsage, error) {
 	return usage, nil
 }
 
-// get 直连局域网相框，并按接口允许的字节数限制响应。
-func get(ctx context.Context, host string, port int, path string, query url.Values, limit int, missing string) ([]byte, error) {
+func frameQuery(source Source, id string) url.Values {
+	return url.Values{"source": {string(source)}, "id": {id}}
+}
+
+// request 直连局域网相框，并按接口允许的字节数限制响应。
+func request(ctx context.Context, method, host string, port int, path string, query url.Values, wantStatus, limit int, missing string) ([]byte, error) {
 	if port < 1 || port > 65535 {
 		return nil, fmt.Errorf("端口超出范围：%d", port)
 	}
 	// ESP-IDF 返回原始查询串。百分号编码空格，和文件名里的加号区分。
 	endpoint := url.URL{Scheme: "http", Host: net.JoinHostPort(host, strconv.Itoa(port)), Path: path,
 		RawQuery: strings.ReplaceAll(query.Encode(), "+", "%20")}
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint.String(), nil)
+	request, err := http.NewRequestWithContext(ctx, method, endpoint.String(), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -143,7 +154,7 @@ func get(ctx context.Context, host string, port int, path string, query url.Valu
 	if response.StatusCode == http.StatusNotFound {
 		return nil, fmt.Errorf("%s", missing)
 	}
-	if response.StatusCode != http.StatusOK {
+	if response.StatusCode != wantStatus {
 		body, _ := io.ReadAll(io.LimitReader(response.Body, 1024))
 		return nil, fmt.Errorf("HTTP %d：%s", response.StatusCode, strings.TrimSpace(string(body)))
 	}

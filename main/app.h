@@ -13,17 +13,18 @@
  */
 
 /** @brief 屏幕动作。按键与控制台都投到这里，由显示任务串行执行。 */
-enum class display_cmd { refresh, next, prev, factory, inbox };
+enum class display_cmd { refresh, next, prev, factory, inbox, pick_boot, pick_inbox, pick_sd };
 
 /**
  * @brief 把一条屏幕动作投给显示任务。
  *
  * @param[in] cmd 动作。
- * @return ESP_OK 已入队；ESP_ERR_INVALID_STATE 命令队列还没建好；ESP_ERR_NO_MEM 队列满。
+ * @param[in] sd_name 仅 pick_sd 使用，由调用方校验为根目录帧文件名，入队时复制。
+ * @return ESP_OK 已入队；ESP_ERR_INVALID_STATE 队列或显示任务不可用；ESP_ERR_NO_MEM 队列满。
  *
  * @note 只投递不等待：一次整帧刷新要几十秒，控制台不能跟着卡住。
  */
-esp_err_t app_post_display(display_cmd cmd);
+esp_err_t app_post_display(display_cmd cmd, const char *sd_name = nullptr);
 
 /**
  * @brief 请求立即进入深度睡眠。
@@ -63,5 +64,5 @@ void app_frame_transfer_begin(void);
  */
 void app_frame_transfer_end(void);
 
-/** @brief HTTP 服务启动后注册设备画面列表、容量和预览接口。 */
+/** @brief HTTP 服务启动后注册设备画面列表、容量、预览和选图刷屏接口。 */
 esp_err_t app_register_frame_browse(void);

@@ -66,15 +66,29 @@ func TestBrowsePictureFromSD(t *testing.T) {
 	}
 }
 
-func TestStorage(t *testing.T) {
+func TestDisplayAndStorage(t *testing.T) {
+	const name = "相片 + 100%.bin"
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet || r.URL.Path != "/frames/storage" {
-			t.Errorf("容量请求错误：%s %s", r.Method, r.URL)
+		switch r.URL.Path {
+		case "/frame/display":
+			if r.Method != http.MethodPost || r.ContentLength != 0 || r.URL.Query().Get("source") != "sd" || r.URL.Query().Get("id") != name {
+				t.Errorf("显示请求错误：%s %s", r.Method, r.URL)
+			}
+			w.WriteHeader(http.StatusAccepted)
+		case "/frames/storage":
+			if r.Method != http.MethodGet {
+				t.Errorf("容量请求错误：%s", r.Method)
+			}
+			fmt.Fprint(w, `{"artifacts":{"used_bytes":1450000,"total_bytes":12000000},"sd":null}`)
+		default:
+			http.NotFound(w, r)
 		}
-		fmt.Fprint(w, `{"artifacts":{"used_bytes":1450000,"total_bytes":12000000},"sd":null}`)
 	}))
 	defer server.Close()
 	host, port := serverAddress(t, server)
+	if err := Display(t.Context(), host, port, SD, name); err != nil {
+		t.Fatal(err)
+	}
 	storage, err := Storage(t.Context(), host, port)
 	if err != nil {
 		t.Fatal(err)
