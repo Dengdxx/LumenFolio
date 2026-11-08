@@ -1,6 +1,6 @@
 # 六色面板抖动
 
-`lumenfolio/panel` 的 `AdditionalAlgorithms()` 返回可独立调用的额外抖动算法。每项实现现有的 `Ditherer`，调用 `Name()` 取得名称，再对取景采样后的 1200×1600 `*image.NRGBA` 调用 `Dither(src)`。结果是同尺寸的六色预览图，只使用面板调色板中的不透明颜色。桌面界面继续使用 `Algorithms()` 提供的选项。
+`lumenfolio/panel` 的 `Algorithms()` 返回界面和命令行共用的全部抖动预设。每项实现 `Ditherer`，调用 `Name()` 取得名称，再对取景采样后的 1200×1600 `*image.NRGBA` 调用 `Dither(src)`。结果是同尺寸的六色预览图，只使用面板调色板中的不透明颜色。返回顺序就是界面按钮和 `--alg` 的序号。
 
 | 算法 | 区别 |
 | --- | --- |
@@ -19,7 +19,7 @@
 
 ## 调参接口
 
-调用方通过构造函数生成 `Ditherer`，再走同一条 `Dither(src)` 路径。实例可复用，构造时校验参数。现有 `Algorithms()` 和 `AdditionalAlgorithms()` 仍提供原来的预设。
+调用方通过构造函数生成 `Ditherer`，再走同一条 `Dither(src)` 路径。实例可复用，构造时校验参数。`Algorithms()` 提供界面和命令行共用的预设；自定义参数使用下面的构造函数。
 
 | 构造函数 | 参数 |
 | --- | --- |
@@ -47,4 +47,4 @@ preview := dither.Dither(sampled)
 ## 易错点（务必遵守）
 
 - 画面缩放后颗粒与上屏不一致。原因是对预览尺寸做了抖动。应先采样到面板分辨率，抖动后再缩小显示。
-- 新算法直接出现在现有 GUI 里。原因是把它们加进了界面读取的 `Algorithms()`。界面接入前，通过 `AdditionalAlgorithms()` 单独调用。
+- 新增预设插到 `Algorithms()` 中间会让旧的 `--alg` 序号指向另一种算法。新预设只追加在末尾；界面按钮和命令行共用这个顺序，默认 `1` 仍是同向扫描的 Floyd-Steinberg。

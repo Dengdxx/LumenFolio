@@ -116,6 +116,7 @@ type ui struct {
 	toPreviewBtn widget.Clickable
 	toCropBtn    widget.Clickable
 	algButtons   []widget.Clickable
+	algList      layout.List
 
 	mode     viewMode
 	crop     panel.Crop
@@ -170,6 +171,7 @@ func newUI(shaper *text.Shaper, initialFile string) *ui {
 		theme:       theme,
 		initialFile: initialFile,
 		algButtons:  make([]widget.Clickable, len(panel.Algorithms())),
+		algList:     layout.List{Axis: layout.Vertical},
 		mode:        modeCrop,
 		status:      "打开一张图片，通过取景框旋转、平移和滚轮缩放选取构图。",
 		openResult:  make(chan openResult, 1),
@@ -312,8 +314,7 @@ func (u *ui) sidebar(gtx layout.Context) layout.Dimensions {
 			layout.Rigid(u.cropControls),
 			layout.Rigid(u.section("抖动算法")),
 			layout.Rigid(gap(6)),
-			layout.Rigid(u.algorithmList),
-			layout.Flexed(1, layout.Spacer{}.Layout),
+			layout.Flexed(1, u.algorithmList),
 			layout.Rigid(gap(10)),
 			layout.Rigid(u.section("墨水")),
 			layout.Rigid(gap(6)),
@@ -416,11 +417,9 @@ func (u *ui) button(label string, clickable *widget.Clickable, action func()) la
 
 func (u *ui) algorithmList(gtx layout.Context) layout.Dimensions {
 	algs := panel.Algorithms()
-	children := make([]layout.FlexChild, len(algs))
-	for index := range algs {
-		children[index] = layout.Rigid(u.algorithm(index, algs[index].Name()))
-	}
-	return layout.Flex{Axis: layout.Vertical}.Layout(gtx, children...)
+	return u.algList.Layout(gtx, len(algs), func(gtx layout.Context, index int) layout.Dimensions {
+		return u.algorithm(index, algs[index].Name())(gtx)
+	})
 }
 
 func (u *ui) algorithm(index int, name string) layout.Widget {

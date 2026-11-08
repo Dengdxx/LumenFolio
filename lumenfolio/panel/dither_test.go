@@ -33,13 +33,33 @@ func gradient() *image.NRGBA {
 	return img
 }
 
+func TestAlgorithmsKeepSharedOrder(t *testing.T) {
+	want := []string{
+		"最近色", "Floyd-Steinberg", "Bayer 4×4", "Bayer 8×8", "随机噪声",
+		"Floyd-Steinberg（蛇形）", "Atkinson", "Sierra Lite", "Burkes", "Sierra Two-Row",
+		"Sierra", "Stucki", "Jarvis–Judice–Ninke", "蓝噪声 64×64",
+	}
+	algs := Algorithms()
+	if len(algs) != len(want) {
+		t.Fatalf("算法数量 %d", len(algs))
+	}
+	seen := map[string]bool{}
+	for index, alg := range algs {
+		name := alg.Name()
+		if name != want[index] || seen[name] {
+			t.Fatalf("序号 %d 是 %s", index, name)
+		}
+		seen[name] = true
+	}
+}
+
 func TestDitherUsesOnlyInks(t *testing.T) {
 	src := gradient()
 	allowed := map[color.NRGBA]bool{}
 	for _, ink := range inks {
 		allowed[ink.Preview] = true
 	}
-	for _, alg := range append(Algorithms(), AdditionalAlgorithms()...) {
+	for _, alg := range Algorithms() {
 		dst := alg.Dither(src)
 		if !dst.Bounds().Eq(src.Bounds()) {
 			t.Fatalf("%s 尺寸 %v", alg.Name(), dst.Bounds())
@@ -56,7 +76,7 @@ func TestDitherUsesOnlyInks(t *testing.T) {
 func TestDitherDiffersFromNearest(t *testing.T) {
 	src := gradient()
 	base := Algorithms()[0].Dither(src)
-	for _, alg := range append(Algorithms()[1:], AdditionalAlgorithms()...) {
+	for _, alg := range Algorithms()[1:] {
 		dst := alg.Dither(src)
 		if bytesEqual(base.Pix, dst.Pix) {
 			t.Errorf("%s 的结果与最近色完全相同", alg.Name())
@@ -66,7 +86,7 @@ func TestDitherDiffersFromNearest(t *testing.T) {
 
 func TestDitherIsDeterministic(t *testing.T) {
 	src := gradient()
-	for _, alg := range append(Algorithms()[1:], AdditionalAlgorithms()...) {
+	for _, alg := range Algorithms()[1:] {
 		t.Run(alg.Name(), func(t *testing.T) {
 			a := alg.Dither(src)
 			b := alg.Dither(src)
@@ -84,7 +104,7 @@ func TestDitherKeepsInkColors(t *testing.T) {
 		stripe := image.Rect(i*stripeWidth, 0, (i+1)*stripeWidth, Height)
 		draw.Draw(src, stripe, image.NewUniform(ink.Preview), image.Point{}, draw.Src)
 	}
-	for _, alg := range append(Algorithms(), AdditionalAlgorithms()...) {
+	for _, alg := range Algorithms() {
 		t.Run(alg.Name(), func(t *testing.T) {
 			dst := alg.Dither(src)
 			if !bytesEqual(src.Pix, dst.Pix) {
@@ -97,8 +117,7 @@ func TestDitherKeepsInkColors(t *testing.T) {
 func TestDitherKeepsWhiteBackground(t *testing.T) {
 	src := image.NewNRGBA(image.Rect(0, 0, Width, Height))
 	draw.Draw(src, src.Bounds(), image.White, image.Point{}, draw.Src)
-	ordered := Algorithms()[2:]
-	for _, alg := range append(ordered, AdditionalAlgorithms()...) {
+	for _, alg := range Algorithms()[2:] {
 		t.Run(alg.Name(), func(t *testing.T) {
 			dst := alg.Dither(src)
 			whitePixels := 0
@@ -137,7 +156,7 @@ func TestAtkinsonMirrorsRowsAndSpreadsTwoRows(t *testing.T) {
 			src.SetNRGBA(bounds.Min.X+x, bounds.Min.Y+y, color.NRGBA{v, v, v, 255})
 		}
 	}
-	for _, alg := range AdditionalAlgorithms() {
+	for _, alg := range Algorithms() {
 		if alg.Name() != "Atkinson" {
 			continue
 		}
@@ -151,7 +170,7 @@ func TestAtkinsonMirrorsRowsAndSpreadsTwoRows(t *testing.T) {
 		}
 		return
 	}
-	t.Fatal("额外算法未提供 Atkinson")
+	t.Fatal("算法列表未提供 Atkinson")
 }
 
 func TestBlueNoiseTileHasUniformThresholds(t *testing.T) {

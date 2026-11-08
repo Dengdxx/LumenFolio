@@ -37,18 +37,6 @@ type DiffusionOptions struct {
 	Strength float64
 }
 
-// AdditionalAlgorithms 返回可独立调用的额外六色抖动算法。
-// 桌面界面的选项仍由 Algorithms 提供。
-func AdditionalAlgorithms() []Ditherer {
-	algorithms := make([]Ditherer, 0, len(diffusionKernels)+1)
-	for _, kernel := range [...]DiffusionKernel{
-		FloydSteinberg, Atkinson, SierraLite, Burkes, SierraTwoRow, Sierra, Stucki, JarvisJudiceNinke,
-	} {
-		algorithms = append(algorithms, diffusionPreset(kernel, ScanSerpentine))
-	}
-	return append(algorithms, builtinBlueNoise(image.Point{}, ThresholdOptions{Strength: 1}))
-}
-
 // NewErrorDiffusion 返回可调强度与扫描方向的六色误差扩散算法。
 func NewErrorDiffusion(kernel DiffusionKernel, options DiffusionOptions) (Ditherer, error) {
 	definition, ok := diffusionKernels[kernel]

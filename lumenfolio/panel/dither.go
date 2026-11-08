@@ -12,7 +12,8 @@ type Ditherer interface {
 	Dither(src *image.NRGBA) *image.NRGBA
 }
 
-// Algorithms 返回桌面界面现用的算法及其默认参数。
+// Algorithms 返回界面和命令行共用的算法。
+// 返回顺序就是界面按钮和 --alg 的序号，新预设只追加在末尾。
 func Algorithms() []Ditherer {
 	return slices.Clone(defaultAlgorithms[:])
 }
@@ -23,6 +24,15 @@ var defaultAlgorithms = [...]Ditherer{
 	bayerDither(4, image.Point{}, ThresholdOptions{Strength: 1}),
 	bayerDither(8, image.Point{}, ThresholdOptions{Strength: 1}),
 	randomDither(1, ThresholdOptions{Strength: 1}),
+	diffusionPreset(FloydSteinberg, ScanSerpentine),
+	diffusionPreset(Atkinson, ScanSerpentine),
+	diffusionPreset(SierraLite, ScanSerpentine),
+	diffusionPreset(Burkes, ScanSerpentine),
+	diffusionPreset(SierraTwoRow, ScanSerpentine),
+	diffusionPreset(Sierra, ScanSerpentine),
+	diffusionPreset(Stucki, ScanSerpentine),
+	diffusionPreset(JarvisJudiceNinke, ScanSerpentine),
+	builtinBlueNoise(image.Point{}, ThresholdOptions{Strength: 1}),
 }
 
 func clamp(v int) int {
