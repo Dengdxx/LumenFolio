@@ -55,6 +55,7 @@ import java.io.IOException
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -69,8 +70,16 @@ private enum class PictureSource(val id: String, val label: String) {
     SD("sd", "SD 卡"),
 }
 
-private data class DevicePicture(val id: String, val name: String)
+private data class DevicePicture(val id: String, val name: String, val revision: String)
 private data class PictureListRequest(val host: String, val source: PictureSource, val refresh: Int)
+private data class DevicePicturePage(val pictures: List<DevicePicture>, val next: String)
+
+/** 当前请求的 ID 用于列表去重，revision 用于区分同名画面内容的变化。 */
+private fun readDevicePicturePage(request: PictureListRequest, after: String): DevicePicturePage {
+    val page = Mobilepanel.listDevicePicturePage(request.host, request.source.id, after)
+    val pictures = List(page.count()) { index -> DevicePicture(page.id(index), page.name(index), page.revision(index)) }
+    return DevicePicturePage(pictures.distinctBy { it.id }, page.next())
+}
 
 private sealed interface PictureRead<out T> {
     data object Loading : PictureRead<Nothing>
@@ -93,14 +102,36 @@ internal fun DevicePicturesScreen(
     val request = PictureListRequest(host, source, listRefresh)
     var selected by remember(request) { mutableStateOf<DevicePicture?>(null) }
     val listState = rememberLazyListState()
-    val thumbnails = remember(request) { mutableStateMapOf<String, ImageBitmap?>() }
+    val thumbnails = remember(request) { mutableStateMapOf<DevicePicture, ImageBitmap?>() }
     val result = if (request.host.isNotEmpty()) {
         readPicture(request, onSuccess = { onConnected(request.host) }) {
-            val list = Mobilepanel.listDevicePictures(request.host, request.source.id)
-            List(list.count()) { index -> DevicePicture(list.id(index), list.name(index)) }
+            readDevicePicturePage(request, "")
         }
     } else {
         null
+    }
+    val firstPage = if (result is PictureRead.Success) result.value else null
+    var page by remember(request, firstPage) { mutableStateOf(firstPage) }
+    val pictures = page?.pictures.orEmpty()
+    val next = page?.next.orEmpty()
+    var loadingMore by remember(request, next, selected) { mutableStateOf(false) }
+    var loadMoreError by remember(request) { mutableStateOf<String?>(null) }
+    if (next.isNotEmpty() && selected == null && loadMoreError == null) {
+        LaunchedEffect(request, next) {
+            val tail = pictures.takeLast(2).mapTo(mutableSetOf<Any>()) { it.id }
+            snapshotFlow { tail.isEmpty() || listState.layoutInfo.visibleItemsInfo.any { it.key in tail } }.first { it }
+            loadingMore = true
+            try {
+                val added = withContext(Dispatchers.IO) { readDevicePicturePage(request, next) }
+                page = DevicePicturePage((pictures + added.pictures).associateBy { it.id }.values.toList(), added.next)
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                loadMoreError = error.localizedMessage ?: "请确认相框已唤醒且地址正确。"
+            } finally {
+                loadingMore = false
+            }
+        }
     }
     val infoRequest = host to infoRefresh
     val storage = if (host.isNotEmpty()) {
@@ -124,17 +155,27 @@ internal fun DevicePicturesScreen(
     }
 
     if (result is PictureRead.Success && selected == null) {
-        LaunchedEffect(request) {
-            val ids = result.value.mapTo(mutableSetOf()) { it.id }
+        LaunchedEffect(request, pictures) {
+            val indices = pictures.withIndex().associate { it.value.id to it.index }
             snapshotFlow {
-                listState.layoutInfo.visibleItemsInfo.mapNotNull { item -> (item.key as? String)?.takeIf { it in ids } }
-            }.collectLatest { visibleIds ->
-                for (id in visibleIds) {
-                    if (thumbnails.containsKey(id)) continue
-                    thumbnails[id] = try {
+                listState.layoutInfo.visibleItemsInfo.mapNotNull { item -> (item.key as? String)?.let(indices::get) }
+            }.collectLatest { visible ->
+                if (visible.isEmpty()) {
+                    thumbnails.clear()
+                    return@collectLatest
+                }
+                val after = visible.last() + 1
+                val end = minOf(pictures.size, after + 2)
+                // 解码结果仅留在视口周边，滚回较远的条目时由 Go 缓存提供小图。
+                thumbnails.keys.retainAll(pictures.subList(maxOf(0, visible.first() - 2), end).toSet())
+                for (picture in visible.map(pictures::get) + pictures.subList(after, end)) {
+                    if (thumbnails.containsKey(picture)) continue
+                    thumbnails[picture] = try {
                         thumbnailTransfer.withLock {
                             withContext(Dispatchers.IO) {
-                                val png = Mobilepanel.thumbnailDevicePicture(request.host, request.source.id, id)
+                                val png = Mobilepanel.thumbnailDevicePictureFor(
+                                    request.host, request.source.id, picture.id, picture.revision,
+                                )
                                 BitmapFactory.decodeByteArray(png, 0, png.size)?.asImageBitmap()
                             }
                         }
@@ -219,8 +260,8 @@ internal fun DevicePicturesScreen(
                 PictureRead.Loading -> item { PictureLoading("正在读取${source.label}图片…") }
                 is PictureRead.Failure -> item { PictureMessage("读取列表失败：${result.message}", error = true) }
                 is PictureRead.Success -> {
-                    if (result.value.isEmpty()) item { PictureMessage("${source.label}中没有图片。") }
-                    items(result.value, key = { it.id }) { picture ->
+                    if (pictures.isEmpty() && next.isEmpty()) item { PictureMessage("${source.label}中没有图片。") }
+                    items(pictures, key = { it.id }) { picture ->
                         ListItem(
                             leadingContent = {
                                 Box(
@@ -229,12 +270,12 @@ internal fun DevicePicturesScreen(
                                         .background(MaterialTheme.colorScheme.surfaceVariant),
                                     contentAlignment = Alignment.Center,
                                 ) {
-                                    val thumbnail = thumbnails[picture.id]
+                                    val thumbnail = thumbnails[picture]
                                     if (thumbnail != null) {
                                         Image(thumbnail, contentDescription = null, modifier = Modifier.fillMaxSize())
                                     } else {
                                         Text(
-                                            if (thumbnails.containsKey(picture.id)) "—" else "…",
+                                            if (thumbnails.containsKey(picture)) "—" else "…",
                                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                                         )
                                     }
@@ -246,6 +287,15 @@ internal fun DevicePicturesScreen(
                             trailingContent = { Text("预览") },
                             modifier = Modifier.clickable { selected = picture },
                         )
+                    }
+                    if (loadingMore) item { PictureLoading("正在读取下一页…") }
+                    loadMoreError?.let { message ->
+                        item {
+                            Column {
+                                PictureMessage("读取下一页失败：$message", error = true)
+                                TextButton(onClick = { loadMoreError = null }) { Text("重试") }
+                            }
+                        }
                     }
                 }
             }

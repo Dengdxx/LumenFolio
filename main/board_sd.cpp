@@ -167,6 +167,65 @@ bool is_frame_name(const char *name)
            strpbrk(name, "/\\:") == nullptr && strcasecmp(name + len - 4, ".bin") == 0;
 }
 
+bool frame_entry(const struct dirent *entry)
+{
+    return entry->d_type == DT_REG && is_frame_name(entry->d_name);
+}
+
+/** @brief name 为空指针时统计全目录，否则返回该名称在翻页顺序中的序号。 */
+int count_or_find_frame(const char *name)
+{
+    DIR *dir = opendir(BOARD_SD_MOUNT_POINT);
+    if (dir == nullptr) {
+        return -1;
+    }
+    int count = 0;
+    bool found = name == nullptr;
+    struct dirent *entry = nullptr;
+    while ((entry = readdir(dir)) != nullptr) {
+        if (frame_entry(entry)) {
+            const int order = name == nullptr ? -1 : strcasecmp(entry->d_name, name);
+            if (order < 0) ++count;
+            if (order == 0) found = true;
+        }
+    }
+    closedir(dir);
+    return found ? count : -1;
+}
+
+bool name_before(const char *a, const char *b, bool reverse)
+{
+    return reverse ? strcasecmp(a, b) > 0 : strcasecmp(a, b) < 0;
+}
+
+/** @brief 全目录扫描只保留游标之后最近的一批文件名，调用者持有 SD 锁。 */
+int collect_after(const char *after, int limit, bool reverse = false)
+{
+    DIR *dir = opendir(BOARD_SD_MOUNT_POINT);
+    if (dir == nullptr) {
+        return -1;
+    }
+    int count = 0;
+    struct dirent *entry = nullptr;
+    while ((entry = readdir(dir)) != nullptr) {
+        const char *name = entry->d_name;
+        if (!frame_entry(entry) || (*after && !name_before(after, name, reverse))) {
+            continue;
+        }
+        if (count == limit && !name_before(name, s_display_frames[count - 1], reverse)) {
+            continue;
+        }
+        int at = count < limit ? count++ : count - 1;
+        while (at > 0 && name_before(name, s_display_frames[at - 1], reverse)) {
+            strcpy(s_display_frames[at], s_display_frames[at - 1]);
+            --at;
+        }
+        strcpy(s_display_frames[at], name);
+    }
+    closedir(dir);
+    return count;
+}
+
 /**
  * @brief 扫根目录，把 .bin 文件名按字典序插入排序，返回个数。
  *
@@ -206,7 +265,7 @@ int collect_frames(board_sd_frame_names &names)
  * @brief 打开合法帧并定位到帧头，额外的文件尾字节不参与预览。
  * @note 调用者持有 SD 锁并负责关闭。只检查帧头，不解码像素。
  */
-FILE *open_browse_frame(const char *name, size_t &size)
+FILE *open_browse_frame(const char *name, size_t &size, board_sd_frame_revision *revision = nullptr)
 {
     char path[sizeof(BOARD_SD_MOUNT_POINT) + BOARD_SD_FRAME_NAME_BYTES];
     snprintf(path, sizeof(path), "%s/%s", BOARD_SD_MOUNT_POINT, name);
@@ -229,6 +288,10 @@ FILE *open_browse_frame(const char *name, size_t &size)
         return nullptr;
     }
     size = info.frame_bytes;
+    if (revision != nullptr) {
+        revision->bytes = static_cast<size_t>(stat_info.st_size);
+        revision->modified = stat_info.st_mtime;
+    }
     return file;
 }
 
@@ -240,7 +303,7 @@ int board_sd_frame_count(void)
     if (s_card == nullptr) {
         return 0;
     }
-    const int count = collect_frames(s_display_frames);
+    const int count = count_or_find_frame(nullptr);
     return count < 0 ? 0 : count;
 }
 
@@ -253,30 +316,30 @@ esp_err_t board_sd_frame_at(int index, char *path, size_t size)
     if (s_card == nullptr) {
         return ESP_ERR_INVALID_STATE;
     }
-    const int count = collect_frames(s_display_frames);
+    const int count = count_or_find_frame(nullptr);
     if (index < 0 || index >= count) {
         return ESP_ERR_NOT_FOUND;
     }
-    const int written = snprintf(path, size, "%s/%s", BOARD_SD_MOUNT_POINT, s_display_frames[index]);
-    if (written < 0 || static_cast<size_t>(written) >= size) {
-        ESP_LOGE(kTag, "路径太长：%s/%s", BOARD_SD_MOUNT_POINT, s_display_frames[index]);
-        return ESP_ERR_INVALID_SIZE;
+    // 从较近的一端分批找序号，内存占用与目录大小无关。
+    const bool reverse = index > count / 2;
+    if (reverse) index = count - 1 - index;
+    char cursor[BOARD_SD_FRAME_NAME_BYTES] = {};
+    for (;;) {
+        const int batch = collect_after(cursor, BOARD_SD_MAX_FRAMES, reverse);
+        if (batch <= 0) return ESP_ERR_NOT_FOUND;
+        if (index < batch) {
+            const int written = snprintf(path, size, "%s/%s", BOARD_SD_MOUNT_POINT, s_display_frames[index]);
+            return written < 0 || static_cast<size_t>(written) >= size ? ESP_ERR_INVALID_SIZE : ESP_OK;
+        }
+        index -= batch;
+        strcpy(cursor, s_display_frames[batch - 1]);
     }
-    return ESP_OK;
 }
 
 int board_sd_frame_index(const char *name)
 {
     std::lock_guard lock(s_sd_mutex);
-    if (s_card != nullptr) {
-        const int count = collect_frames(s_display_frames);
-        for (int i = 0; i < count; ++i) {
-            if (strcasecmp(s_display_frames[i], name) == 0) {
-                return i;
-            }
-        }
-    }
-    return -1;
+    return s_card == nullptr ? -1 : count_or_find_frame(name);
 }
 
 esp_err_t board_sd_browse_frames(board_sd_frame_names &names, int &count)
@@ -302,6 +365,45 @@ esp_err_t board_sd_browse_frames(board_sd_frame_names &names, int &count)
         }
     }
     return ESP_OK;
+}
+
+esp_err_t board_sd_browse_page(const char *after, int limit, board_sd_frame_page &page)
+{
+    page.count = 0;
+    page.more = false;
+    if (limit < 1 || limit > BOARD_SD_MAX_FRAMES || (*after && !is_frame_name(after))) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    std::lock_guard lock(s_sd_mutex);
+    const auto *card = s_card.load();
+    if (card == nullptr) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    page.card_manufacturer = static_cast<uint32_t>(card->cid.mfg_id);
+    page.card_serial = static_cast<uint32_t>(card->cid.serial);
+
+    char cursor[BOARD_SD_FRAME_NAME_BYTES];
+    strcpy(cursor, after);
+    for (;;) {
+        // 批量找候选，坏帧密集时也只按批重扫目录。校验到一个后继即返回。
+        const int candidates = collect_after(cursor, BOARD_SD_MAX_FRAMES);
+        if (candidates < 0) return ESP_FAIL;
+        for (int i = 0; i < candidates; ++i) {
+            size_t size;
+            board_sd_frame_revision revision;
+            FILE *file = open_browse_frame(s_display_frames[i], size, &revision);
+            if (file == nullptr) continue;
+            fclose(file);
+            if (page.count == limit) {
+                page.more = true;
+                return ESP_OK;
+            }
+            strcpy(page.names[page.count], s_display_frames[i]);
+            page.revisions[page.count++] = revision;
+        }
+        if (candidates < BOARD_SD_MAX_FRAMES) return ESP_OK;
+        strcpy(cursor, s_display_frames[candidates - 1]);
+    }
 }
 
 esp_err_t board_sd_browse_open(const char *name, size_t &size)

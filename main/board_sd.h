@@ -21,10 +21,26 @@
 /** @brief 挂载点。 */
 #define BOARD_SD_MOUNT_POINT "/sdcard"
 
-/** @brief SD 卡根目录参与翻页与浏览的帧文件数量和名称缓冲上限。 */
+/** @brief SD 帧列表的单页上限和文件名缓冲上限。 */
 inline constexpr int BOARD_SD_MAX_FRAMES = 32;
 inline constexpr size_t BOARD_SD_FRAME_NAME_BYTES = 96;
 using board_sd_frame_names = char[BOARD_SD_MAX_FRAMES][BOARD_SD_FRAME_NAME_BYTES];
+
+/** @brief 单页帧元数据，给 App 区分同名文件的缓存版本。 */
+struct board_sd_frame_revision {
+    size_t bytes;
+    int64_t modified;
+};
+
+/** @brief 由 HTTP 任务持有的一页目录快照，卡标识与文件元数据在同一次查询中取出。 */
+struct board_sd_frame_page {
+    board_sd_frame_names names;
+    board_sd_frame_revision revisions[BOARD_SD_MAX_FRAMES];
+    uint32_t card_manufacturer;
+    uint32_t card_serial;
+    int count;
+    bool more;
+};
 
 /** @brief 卡座里是否插着卡（读 CD 引脚，插卡为低）。 */
 bool board_sd_present();
@@ -73,7 +89,7 @@ int board_sd_list(const char *path, int max_entries);
  * @return 个数；未挂载或卡上没有帧文件返回 0。
  *
  * @note 每次调用都重新扫目录，卡上增删文件后不需要额外通知。
- * @note 最多认 32 个，超出的只记一条警告；不递归子目录。
+ * @note 只统计根目录文件，不递归子目录。
  */
 int board_sd_frame_count(void);
 
@@ -98,6 +114,15 @@ int board_sd_frame_index(const char *name);
  * @note 只检查帧头和声明长度，压缩流由预览端解码时验证。
  */
 esp_err_t board_sd_browse_frames(board_sd_frame_names &names, int &count);
+
+/**
+ * @brief 按文件名顺序查询一页合法帧，跳过坏帧头或截断文件。
+ * @param after 排他游标，空字符串表示从头查询。
+ * @param limit 返回条数上限，为 1 至 BOARD_SD_MAX_FRAMES。
+ * @param[out] page 查询结果，more 为真时用最后一个文件名作为下一页游标。
+ * @return ESP_OK 成功；ESP_ERR_INVALID_STATE 未挂载；ESP_ERR_INVALID_ARG 游标或条数非法。
+ */
+esp_err_t board_sd_browse_page(const char *after, int limit, board_sd_frame_page &page);
 
 /**
  * @brief 打开用于 HTTP 预览的单个根目录帧，返回应发送的编码长度。

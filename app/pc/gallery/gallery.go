@@ -30,8 +30,15 @@ const (
 
 // Picture 是列表中的一张板端图片，ID 用于读取，Name 用于显示。
 type Picture struct {
-	ID   string `json:"id"`
-	Name string `json:"name"`
+	ID       string `json:"id"`
+	Name     string `json:"name"`
+	Revision string `json:"revision"` // 空值表示该固件未提供可跨列表复用的版本。
+}
+
+// Page 是按文件名排列的一页图片，Next 是下一页的游标，空串表示末页。
+type Page struct {
+	Pictures []Picture `json:"frames"`
+	Next     string    `json:"next"`
 }
 
 // Usage 是一个存储区的占用字节数和总字节数。总量为零表示容量不可用。
@@ -79,26 +86,46 @@ var client = &http.Client{
 
 // List 读取指定存储的图片清单。SD 未挂载和已挂载但没有图片分别返回错误和空列表。
 func List(ctx context.Context, host string, port int, source Source) ([]Picture, error) {
-	// SD 根目录最多 32 个帧文件，JSON 同时包含 ID 与名称。
-	body, err := request(ctx, http.MethodGet, host, port, "/frames", url.Values{"source": {string(source)}}, http.StatusOK, 64*1024,
+	page, err := readPage(ctx, host, port, source, url.Values{"source": {string(source)}})
+	return page.Pictures, err
+}
+
+// ListPage 读取一页图库，首次读取时 after 传空串。旧固件返回的原列表作为末页。
+func ListPage(ctx context.Context, host string, port int, source Source, after string) (Page, error) {
+	query := url.Values{"source": {string(source)}}
+	if source == SD {
+		query.Set("limit", "16")
+		if after != "" {
+			query.Set("after", after)
+		}
+	}
+	page, err := readPage(ctx, host, port, source, query)
+	if err == nil && after != "" && page.Next == after {
+		return Page{}, fmt.Errorf("相框返回了重复的分页游标")
+	}
+	return page, err
+}
+
+func readPage(ctx context.Context, host string, port int, source Source, query url.Values) (Page, error) {
+	body, err := request(ctx, http.MethodGet, host, port, "/frames", query, http.StatusOK, 64*1024,
 		"相框固件暂不支持浏览图片，请更新固件")
 	if err != nil {
-		return nil, err
+		return Page{}, err
 	}
 	var list struct {
-		Available bool      `json:"available"`
-		Frames    []Picture `json:"frames"`
+		Available bool `json:"available"`
+		Page
 	}
 	if err := json.Unmarshal(body, &list); err != nil {
-		return nil, fmt.Errorf("读取相框图片列表：%w", err)
+		return Page{}, fmt.Errorf("读取相框图片列表：%w", err)
 	}
 	if !list.Available {
 		if source == SD {
-			return nil, fmt.Errorf("SD 卡未挂载")
+			return Page{}, fmt.Errorf("SD 卡未挂载")
 		}
-		return nil, fmt.Errorf("Flash artifacts 区不可用")
+		return Page{}, fmt.Errorf("Flash artifacts 区不可用")
 	}
-	return list.Frames, nil
+	return list.Page, nil
 }
 
 // Preview 读取指定存储中的一帧并解码为完整的六色预览，不修改相框画面。

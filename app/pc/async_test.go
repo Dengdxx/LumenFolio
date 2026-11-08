@@ -10,6 +10,9 @@ import (
 	"testing"
 	"testing/synctest"
 
+	"gioui.org/layout"
+	"gioui.org/op/paint"
+
 	"lumenfolio/gallery"
 	"lumenfolio/panel"
 )
@@ -177,6 +180,54 @@ func TestGalleryDiscardsQueuedResultOnSourceSwitch(t *testing.T) {
 			t.Fatalf("应显示当前来源的 SD 卡列表，实际为 %v", got)
 		}
 	})
+}
+
+func TestGalleryPageAppendKeepsPreviewAndExistingButton(t *testing.T) {
+	u := newTestUI()
+	g := &u.gallery
+	first, cancelFirst := context.WithCancel(context.Background())
+	g.request, g.cancel = first, cancelFirst
+	g.applyResult(galleryResult{request: first, pictures: []gallery.Picture{{ID: "1.bin"}}, next: "1.bin"})
+	firstButton := g.buttons[0]
+	g.selected = "1.bin"
+	preview := paint.NewImageOp(image.NewNRGBA(image.Rect(0, 0, 3, 4)))
+	g.preview, g.thumbnails["1.bin"] = preview, preview
+
+	second, cancelSecond := context.WithCancel(context.Background())
+	g.request, g.cancel, g.kind = second, cancelSecond, galleryPage
+	g.applyResult(galleryResult{request: first, pictures: []gallery.Picture{{ID: "old.bin"}}})
+	g.applyResult(galleryResult{request: second, pictures: []gallery.Picture{{ID: "1.bin"}, {ID: "2.bin"}}})
+	if len(g.pictures) != 2 || g.pictures[1].ID != "2.bin" || g.nextPage != "" {
+		t.Fatalf("追加应跳过重复和过期条目：%v", g.pictures)
+	}
+	if g.buttons[0] != firstButton || g.selected != "1.bin" || g.preview != preview || g.thumbnails["1.bin"] != preview {
+		t.Fatal("追加下一页应保留已有的点击器、预览和缩略图")
+	}
+}
+
+func TestGalleryRetainsThumbnailsOnlyAroundViewport(t *testing.T) {
+	u := newTestUI()
+	g := &u.gallery
+	g.pictureIndex = make(map[string]int)
+	g.thumbnails = make(map[string]paint.ImageOp)
+	for _, id := range []string{"1.bin", "2.bin", "3.bin", "4.bin", "5.bin", "6.bin", "7.bin"} {
+		g.pictureIndex[id] = len(g.pictures)
+		g.pictures = append(g.pictures, gallery.Picture{ID: id})
+		g.thumbnails[id] = paint.ImageOp{}
+	}
+	g.list.Position = layout.Position{First: 3, Count: 1}
+	request, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	g.request, g.cancel = request, cancel
+	u.loadVisibleGalleryRows()
+	if len(g.thumbnails) != 5 {
+		t.Fatalf("视口一行及前后两行应保留五张缩略图：%v", g.thumbnails)
+	}
+	for _, id := range []string{"1.bin", "7.bin"} {
+		if _, exists := g.thumbnails[id]; exists {
+			t.Fatalf("应清除远离视口的缩略图 %s", id)
+		}
+	}
 }
 
 func TestPreviewAndFileResultsStayIndependent(t *testing.T) {

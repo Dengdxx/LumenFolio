@@ -24,7 +24,7 @@ struct frame_slot {
 constexpr frame_slot kSlots[] = {{"boot", "开机画面", false}, {"inbox", "上传画面", true}};
 
 // 同步 HTTP handler 独占，复用缓冲而不占显示任务的 PSRAM 或 httpd 的栈。
-board_sd_frame_names s_sd_names;
+board_sd_frame_page s_sd_page;
 uint8_t s_chunk[4096];
 
 /** @brief 在一次有效的画面浏览请求中暂停自动深睡，所有返回路径都会恢复空闲计时。 */
@@ -133,9 +133,34 @@ bool decode_id(char *id)
 
 using encoded_id = char[BOARD_SD_FRAME_NAME_BYTES * 3];
 
-frame_source parse_query(httpd_req_t *request, encoded_id *id = nullptr)
+struct page_query {
+    int limit;
+    encoded_id after;
+};
+
+/** @brief SD 分页参数。未传 limit 时沿用原列表协议。 */
+bool parse_page(const char *query, page_query &page)
 {
-    char query[sizeof(encoded_id) + 24];
+    char limit[3];
+    const esp_err_t limit_status = httpd_query_key_value(query, "limit", limit, sizeof(limit));
+    const esp_err_t after_status = httpd_query_key_value(query, "after", page.after, sizeof(page.after));
+    if (limit_status == ESP_ERR_NOT_FOUND) {
+        return after_status == ESP_ERR_NOT_FOUND;
+    }
+    if (limit_status != ESP_OK || (after_status != ESP_OK && after_status != ESP_ERR_NOT_FOUND)) {
+        return false;
+    }
+    for (const char *digit = limit; *digit; ++digit) {
+        if (*digit < '0' || *digit > '9') return false;
+        page.limit = page.limit * 10 + (*digit - '0');
+    }
+    return page.limit >= 1 && page.limit <= BOARD_SD_MAX_FRAMES &&
+           (after_status == ESP_ERR_NOT_FOUND || page.after[0] == '\0' || decode_id(page.after));
+}
+
+frame_source parse_query(httpd_req_t *request, encoded_id *id = nullptr, page_query *page = nullptr)
+{
+    char query[sizeof(encoded_id) + 40];
     char source[16];
     if (httpd_req_get_url_query_str(request, query, sizeof(query)) != ESP_OK ||
         httpd_query_key_value(query, "source", source, sizeof(source)) != ESP_OK ||
@@ -144,7 +169,7 @@ frame_source parse_query(httpd_req_t *request, encoded_id *id = nullptr)
         return frame_source::invalid;
     }
     if (strcmp(source, "artifacts") == 0) return frame_source::artifacts;
-    if (strcmp(source, "sd") == 0) return frame_source::sd;
+    if (strcmp(source, "sd") == 0 && (page == nullptr || parse_page(query, *page))) return frame_source::sd;
     return frame_source::invalid;
 }
 
@@ -165,32 +190,43 @@ void escape_json(char *out, const char *value)
     *out = '\0';
 }
 
-esp_err_t send_list_item(httpd_req_t *request, const char *id, const char *name, bool first)
+esp_err_t send_list_item(httpd_req_t *request, const char *id, const char *name, bool first, const char *revision = nullptr)
 {
     constexpr size_t kEscapedBytes = (BOARD_SD_FRAME_NAME_BYTES - 1) * 6 + 1;
     char escaped_id[kEscapedBytes], escaped_name[kEscapedBytes];
     escape_json(escaped_id, id);
     escape_json(escaped_name, name);
-    char json[kEscapedBytes * 2 + 24];
-    snprintf(json, sizeof(json), "%s{\"id\":\"%s\",\"name\":\"%s\"}",
-             first ? "" : ",", escaped_id, escaped_name);
+    char json[kEscapedBytes * 2 + 96];
+    if (revision == nullptr) {
+        snprintf(json, sizeof(json), "%s{\"id\":\"%s\",\"name\":\"%s\"}",
+                 first ? "" : ",", escaped_id, escaped_name);
+    } else {
+        snprintf(json, sizeof(json), "%s{\"id\":\"%s\",\"name\":\"%s\",\"revision\":\"%s\"}",
+                 first ? "" : ",", escaped_id, escaped_name, revision);
+    }
     return httpd_resp_sendstr_chunk(request, json);
 }
 
 /** @brief GET /frames 按来源列出可预览的帧，未挂载的 SD 与空目录分别表示。 */
 esp_err_t handle_frame_list(httpd_req_t *request)
 {
-    const frame_source source = parse_query(request);
+    page_query page = {};
+    const frame_source source = parse_query(request, nullptr, &page);
     if (source == frame_source::invalid) {
-        return httpd_resp_send_err(request, HTTPD_400_BAD_REQUEST, "需要 source=artifacts 或 source=sd");
+        return httpd_resp_send_err(request, HTTPD_400_BAD_REQUEST, "图片来源或分页参数非法");
     }
     const FrameTransfer transfer;
     bool available = true;
     int count = 0;
     bool present[sizeof(kSlots) / sizeof(kSlots[0])] = {};
     if (source == frame_source::sd) {
-        const esp_err_t err = board_sd_browse_frames(s_sd_names, count);
+        const esp_err_t err = page.limit != 0 ? board_sd_browse_page(page.after, page.limit, s_sd_page)
+                                             : board_sd_browse_frames(s_sd_page.names, s_sd_page.count);
+        count = s_sd_page.count;
         available = err != ESP_ERR_INVALID_STATE;
+        if (err == ESP_ERR_INVALID_ARG) {
+            return httpd_resp_send_err(request, HTTPD_400_BAD_REQUEST, "SD 卡分页游标非法");
+        }
         if (available && err != ESP_OK) {
             return httpd_resp_send_err(request, HTTPD_500_INTERNAL_SERVER_ERROR, "无法读取 SD 卡目录");
         }
@@ -213,7 +249,16 @@ esp_err_t handle_frame_list(httpd_req_t *request)
     }
     if (source == frame_source::sd) {
         for (int i = 0; i < count; ++i) {
-            if (send_list_item(request, s_sd_names[i], s_sd_names[i], i == 0) != ESP_OK) return ESP_FAIL;
+            const char *name = s_sd_page.names[i];
+            char revision[64];
+            if (page.limit != 0) {
+                const auto &file = s_sd_page.revisions[i];
+                snprintf(revision, sizeof(revision), "%" PRIx32 ":%" PRIx32 ":%zu:%" PRId64,
+                         s_sd_page.card_manufacturer, s_sd_page.card_serial, file.bytes, file.modified);
+            }
+            if (send_list_item(request, name, name, i == 0, page.limit != 0 ? revision : nullptr) != ESP_OK) {
+                return ESP_FAIL;
+            }
         }
     } else {
         bool first = true;
@@ -223,7 +268,15 @@ esp_err_t handle_frame_list(httpd_req_t *request)
             first = false;
         }
     }
-    if (httpd_resp_sendstr_chunk(request, "]}") != ESP_OK) return ESP_FAIL;
+    if (page.limit != 0) {
+        char escaped[BOARD_SD_FRAME_NAME_BYTES * 6] = {};
+        if (s_sd_page.more) escape_json(escaped, s_sd_page.names[count - 1]);
+        char tail[sizeof(escaped) + 16];
+        snprintf(tail, sizeof(tail), "],\"next\":\"%s\"}", escaped);
+        if (httpd_resp_sendstr_chunk(request, tail) != ESP_OK) return ESP_FAIL;
+    } else if (httpd_resp_sendstr_chunk(request, "]}") != ESP_OK) {
+        return ESP_FAIL;
+    }
     return httpd_resp_send_chunk(request, nullptr, 0);
 }
 

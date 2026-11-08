@@ -117,6 +117,44 @@ func TestThumbnailRetriesBusyQueueWithoutDownloadingFrame(t *testing.T) {
 	}
 }
 
+func TestListPageWithRevision(t *testing.T) {
+	const after = "相片 + 100%.bin"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		query := r.URL.Query()
+		if r.URL.Path != "/frames" || query.Get("source") != "sd" || query.Get("limit") != "16" || query.Get("after") != after {
+			t.Errorf("分页请求错误：%s", r.URL)
+		}
+		fmt.Fprint(w, `{"available":true,"frames":[{"id":"下一张.bin","name":"下一张.bin","revision":"card:123:456"}],"next":"下一张.bin"}`)
+	}))
+	defer server.Close()
+	host, port := serverAddress(t, server)
+	page, err := ListPage(t.Context(), host, port, SD, after)
+	if err != nil || len(page.Pictures) != 1 || page.Pictures[0].Revision != "card:123:456" || page.Next != "下一张.bin" {
+		t.Fatalf("分页结果错误：%+v，%v", page, err)
+	}
+}
+
+func TestThumbnailForCachesOnlyMatchingRevision(t *testing.T) {
+	var requests atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/frame/thumb" {
+			t.Errorf("缩略图路径错误：%s", r.URL)
+		}
+		requests.Add(1)
+		w.Write(make([]byte, thumbnailBytes))
+	}))
+	defer server.Close()
+	host, port := serverAddress(t, server)
+	for _, revision := range []string{"first", "first", "second", "", ""} {
+		if _, err := ThumbnailFor(t.Context(), host, port, SD, Picture{ID: "one.bin", Revision: revision}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if requests.Load() != 4 {
+		t.Fatalf("只应复用版本一致的小图，实际请求 %d 次", requests.Load())
+	}
+}
+
 func TestDisplayAndStorage(t *testing.T) {
 	const name = "相片 + 100%.bin"
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

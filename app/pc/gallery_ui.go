@@ -26,14 +26,19 @@ type galleryBrowser struct {
 	sdButton          widget.Clickable
 	refreshInfoButton widget.Clickable
 	refreshListButton widget.Clickable
+	retryPageButton   widget.Clickable
 	displayButton     widget.Clickable
-	buttons           []widget.Clickable
+	buttons           []*widget.Clickable
 	list              layout.List
 
 	host          string
 	source        gallery.Source
 	pictures      []gallery.Picture
+	pictureIndex  map[string]int
+	nextPage      string
+	pageErr       error
 	thumbnails    map[string]paint.ImageOp
+	thumbnailRow  int
 	selected      string
 	preview       paint.ImageOp
 	err           error
@@ -53,13 +58,17 @@ type galleryRequestKind uint8
 
 const (
 	galleryRead galleryRequestKind = iota
+	galleryPage
 	galleryThumbnail
 	galleryDisplay
 )
 
+const galleryLookahead = 2
+
 type galleryResult struct {
 	request  context.Context
 	pictures []gallery.Picture
+	next     string
 	preview  paint.ImageOp
 	id       string
 	err      error
@@ -85,6 +94,8 @@ func (u *ui) closeGallery() {
 	g.cancelInfoRequest()
 	g.host = ""
 	g.pictures = nil
+	g.pictureIndex = nil
+	g.nextPage, g.pageErr = "", nil
 	g.buttons = nil
 	g.thumbnails = nil
 	g.preview = paint.ImageOp{}
@@ -95,17 +106,29 @@ func (u *ui) loadGallery(source gallery.Source) {
 	g := &u.gallery
 	g.source = source
 	g.pictures = nil
+	g.pictureIndex = nil
 	g.buttons = nil
 	g.thumbnails = nil
+	g.nextPage, g.pageErr = "", nil
 	g.selected = ""
 	g.preview, g.err = paint.ImageOp{}, nil
 	g.displayStatus, g.displayError = "", false
 	g.list = layout.List{Axis: layout.Vertical}
-	host := g.host
+	u.readGalleryPage("")
+}
+
+// readGalleryPage 把游标和来源固定到本次请求。切换来源或刷新时由新请求取消旧结果。
+func (u *ui) readGalleryPage(after string) {
+	g := &u.gallery
+	host, source := g.host, g.source
 	u.startGalleryRequest(func(ctx context.Context) galleryResult {
-		pictures, err := gallery.List(ctx, host, 8080, source)
-		return galleryResult{pictures: pictures, err: err}
+		page, err := gallery.ListPage(ctx, host, 8080, source, after)
+		return galleryResult{pictures: page.Pictures, next: page.Next, err: err}
 	})
+	if after != "" {
+		g.kind = galleryPage
+		u.window.Invalidate()
+	}
 }
 
 func (u *ui) loadGalleryPreview(id string) {
@@ -123,28 +146,59 @@ func (u *ui) loadGalleryPreview(id string) {
 	})
 }
 
-// loadVisibleThumbnail 在列表完成布局后按可见范围串行读取，给主动打开的预览和刷屏让路。
-func (u *ui) loadVisibleThumbnail() {
+// loadVisibleGalleryRows 只保留视口周边的小图。可见条目优先于下一页和下方两项预取。
+// 用户打开完整预览或提交显示时，前台操作替换正在进行的后台读取。
+func (u *ui) loadVisibleGalleryRows() {
 	g := &u.gallery
+	first := g.list.Position.First
+	end := min(first+g.list.Position.Count, len(g.pictures))
+	keepStart, keepEnd := max(0, first-galleryLookahead), min(end+galleryLookahead, len(g.pictures))
+	for id := range g.thumbnails {
+		index := g.pictureIndex[id]
+		if index < keepStart || index >= keepEnd {
+			delete(g.thumbnails, id)
+		}
+	}
+	visible := g.firstMissingThumbnail(first, end)
+	if g.kind == galleryThumbnail && (g.thumbnailRow < first || g.thumbnailRow >= keepEnd ||
+		(g.thumbnailRow >= end && visible >= 0)) {
+		g.cancelRequest()
+	}
 	if g.request != nil {
 		return
 	}
-	first, count := g.list.Position.First, g.list.Position.Count
-	for _, entry := range g.pictures[first : first+count] {
-		if _, loaded := g.thumbnails[entry.ID]; loaded {
-			continue
+	switch {
+	case visible >= 0:
+		u.loadGalleryThumbnail(visible)
+	case g.nextPage != "" && g.pageErr == nil && keepEnd == len(g.pictures):
+		u.readGalleryPage(g.nextPage)
+	default:
+		if below := g.firstMissingThumbnail(end, keepEnd); below >= 0 {
+			u.loadGalleryThumbnail(below)
 		}
-		host, source, id := g.host, g.source, entry.ID
-		u.startGalleryRequest(func(ctx context.Context) galleryResult {
-			pixels, err := gallery.Thumbnail(ctx, host, 8080, source, id)
-			if err != nil {
-				return galleryResult{id: id, err: err}
-			}
-			return galleryResult{id: id, preview: paint.NewImageOp(pixels)}
-		})
-		g.kind = galleryThumbnail
-		return
 	}
+}
+
+func (g *galleryBrowser) firstMissingThumbnail(first, end int) int {
+	for index := first; index < end; index++ {
+		if _, loaded := g.thumbnails[g.pictures[index].ID]; !loaded {
+			return index
+		}
+	}
+	return -1
+}
+
+func (u *ui) loadGalleryThumbnail(index int) {
+	g := &u.gallery
+	host, source, picture := g.host, g.source, g.pictures[index]
+	u.startGalleryRequest(func(ctx context.Context) galleryResult {
+		pixels, err := gallery.ThumbnailFor(ctx, host, 8080, source, picture)
+		if err != nil {
+			return galleryResult{id: picture.ID, err: err}
+		}
+		return galleryResult{id: picture.ID, preview: paint.NewImageOp(pixels)}
+	})
+	g.kind, g.thumbnailRow = galleryThumbnail, index
 }
 
 func (u *ui) displayGalleryPicture() {
@@ -225,8 +279,14 @@ func (g *galleryBrowser) applyResult(result galleryResult) {
 	kind := g.kind
 	g.cancelRequest()
 	switch kind {
+	case galleryPage:
+		g.pageErr = result.err
+		if result.err == nil {
+			g.appendPage(result)
+		}
+		return
 	case galleryThumbnail:
-		// 失败的条目保留占位，等刷新时重试，避免每一帧都重新发请求。
+		// 可见范围内的失败条目也保留占位，避免每一帧都重新发请求。
 		g.thumbnails[result.id] = result.preview
 		return
 	case galleryDisplay:
@@ -243,9 +303,22 @@ func (g *galleryBrowser) applyResult(result galleryResult) {
 		g.preview = result.preview
 		return
 	}
-	g.pictures = result.pictures
-	g.buttons = make([]widget.Clickable, len(g.pictures))
-	g.thumbnails = make(map[string]paint.ImageOp, len(g.pictures))
+	g.pictureIndex = make(map[string]int, len(result.pictures))
+	g.thumbnails = make(map[string]paint.ImageOp)
+	g.appendPage(result)
+}
+
+// appendPage 按设备顺序追加未出现的条目。已有按钮的地址保持稳定，延续 Gio 焦点和点击状态。
+func (g *galleryBrowser) appendPage(result galleryResult) {
+	for _, picture := range result.pictures {
+		if _, exists := g.pictureIndex[picture.ID]; exists {
+			continue
+		}
+		g.pictureIndex[picture.ID] = len(g.pictures)
+		g.pictures = append(g.pictures, picture)
+		g.buttons = append(g.buttons, new(widget.Clickable))
+	}
+	g.nextPage = result.next
 }
 
 func (u *ui) galleryLayout(gtx layout.Context) layout.Dimensions {
@@ -320,32 +393,63 @@ func (u *ui) gallerySourceButton(label, usage string, button *widget.Clickable, 
 }
 
 func (u *ui) galleryList(gtx layout.Context) layout.Dimensions {
-	g := &u.gallery
 	gtx.Constraints.Max.X = gtx.Dp(unit.Dp(248))
 	gtx.Constraints.Min = gtx.Constraints.Max
 	return u.card(gtx, func(gtx layout.Context) layout.Dimensions {
 		return layout.UniformInset(unit.Dp(12)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-			dims := g.list.Layout(gtx, len(g.pictures), func(gtx layout.Context, index int) layout.Dimensions {
-				entry, button := g.pictures[index], &g.buttons[index]
-				if button.Clicked(gtx) && (g.selected != entry.ID || g.err != nil) {
-					u.loadGalleryPreview(entry.ID)
-				}
-				thumbnail, loaded := g.thumbnails[entry.ID]
-				return u.choiceLayout(gtx, button, g.selected == entry.ID, func(gtx layout.Context, foreground color.NRGBA) layout.Dimensions {
-					label := material.Body1(u.theme, entry.Name)
-					label.Color = foreground
-					label.MaxLines = 2
-					return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
-						layout.Rigid(func(gtx layout.Context) layout.Dimensions { return u.galleryThumbnail(gtx, thumbnail, loaded) }),
-						layout.Rigid(gap(12)),
-						layout.Flexed(1, label.Layout),
-					)
-				})
-			})
-			u.loadVisibleThumbnail()
-			return dims
+			return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+				layout.Flexed(1, u.galleryRows),
+				layout.Rigid(u.galleryPageNotice),
+			)
 		})
 	})
+}
+
+func (u *ui) galleryRows(gtx layout.Context) layout.Dimensions {
+	g := &u.gallery
+	dims := g.list.Layout(gtx, len(g.pictures), func(gtx layout.Context, index int) layout.Dimensions {
+		entry, button := g.pictures[index], g.buttons[index]
+		if button.Clicked(gtx) && (g.selected != entry.ID || g.err != nil) {
+			u.loadGalleryPreview(entry.ID)
+		}
+		thumbnail, loaded := g.thumbnails[entry.ID]
+		return u.choiceLayout(gtx, button, g.selected == entry.ID, func(gtx layout.Context, foreground color.NRGBA) layout.Dimensions {
+			label := material.Body1(u.theme, entry.Name)
+			label.Color = foreground
+			label.MaxLines = 2
+			return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
+				layout.Rigid(func(gtx layout.Context) layout.Dimensions { return u.galleryThumbnail(gtx, thumbnail, loaded) }),
+				layout.Rigid(gap(12)),
+				layout.Flexed(1, label.Layout),
+			)
+		})
+	})
+	u.loadVisibleGalleryRows()
+	return dims
+}
+
+func (u *ui) galleryPageNotice(gtx layout.Context) layout.Dimensions {
+	g := &u.gallery
+	if g.kind == galleryPage {
+		return u.section("正在读取下一页…")(gtx)
+	}
+	if g.pageErr == nil {
+		return layout.Dimensions{}
+	}
+	label := material.Caption(u.theme, g.pageErr.Error())
+	label.Color, label.MaxLines = u.colors.error, 2
+	return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+		layout.Rigid(label.Layout),
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			if g.request != nil && g.kind != galleryThumbnail {
+				gtx = gtx.Disabled()
+			}
+			return u.tabButton("重试下一页", &g.retryPageButton, false, func() {
+				g.pageErr = nil
+				u.readGalleryPage(g.nextPage)
+			})(gtx)
+		}),
+	)
 }
 
 func (u *ui) galleryThumbnail(gtx layout.Context, thumbnail paint.ImageOp, loaded bool) layout.Dimensions {
@@ -381,7 +485,7 @@ func (u *ui) galleryPreview(gtx layout.Context) layout.Dimensions {
 			message = g.err.Error()
 		case g.request != nil && g.kind == galleryRead && g.selected == "":
 			message = "正在读取图片列表…"
-		case g.request != nil:
+		case g.request != nil && g.kind == galleryRead:
 			message = "正在读取图片…"
 		case len(g.pictures) == 0:
 			message = "此来源暂无可预览图片"
