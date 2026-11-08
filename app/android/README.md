@@ -25,24 +25,44 @@ Android 版与 [Windows 图形界面](../../docs/preview.md) 共用取景、六�
 
 需要 Go 1.27、JDK 17、Android SDK 36、Android NDK 和 Gradle 8.13。设置 `ANDROID_HOME` 指向 SDK。NDK 可以由 SDK Manager 并排安装，也可以用 `ANDROID_NDK_HOME` 指定。App 的最低系统版本为 Android 8.0。
 
-先在仓库根目录执行以下 PowerShell 命令生成供 Gradle 引用的 AAR。绑定工具版本由 `app/android/mobilepanel/go.mod` 指定。
+构建 Debug 或 Release 前，在仓库根目录执行以下 PowerShell 命令安装绑定工具，并把工具所在目录加入当前终端的 `PATH`。工具版本由 `app/android/mobilepanel/go.mod` 指定。
 
 ```powershell
-New-Item -ItemType Directory -Force app/android/app/libs | Out-Null
 Push-Location app/android/mobilepanel
 go install tool
 $toolBin = go env GOBIN
 if (-not $toolBin) { $toolBin = Join-Path (go env GOPATH) 'bin' }
 $env:Path = "$toolBin;$env:Path"
-gomobile bind -target=android -androidapi 26 '-javapkg=org.lumenfolio' -o ../app/libs/mobilepanel.aar .
 Pop-Location
 ```
 
-用 Android Studio 打开 `app/android`，也可以在仓库根目录用 `gradle -p app/android :app:assembleDebug`。Go 绑定和共用图像处理代码改动后，重新生成 AAR。
+### Debug
+
+从仓库根目录手动生成 AAR，再构建 Debug。Debug 保留 `arm64-v8a`、`armeabi-v7a`、`x86` 和 `x86_64`，可用于手机和模拟器。修改 Go 绑定或共用 Go 代码后，重新生成 Debug AAR。
+
+```powershell
+New-Item -ItemType Directory -Force app/android/app/libs | Out-Null
+Push-Location app/android/mobilepanel
+gomobile bind -target=android -androidapi 26 '-javapkg=org.lumenfolio' -o ../app/libs/mobilepanel.aar .
+Pop-Location
+gradle -p app/android :app:assembleDebug
+```
+
+生成 AAR 后，也可用 Android Studio 打开 `app/android` 构建 Debug。
+
+### Release
+
+```powershell
+gradle -p app/android :app:assembleRelease
+```
+
+Release 通过 Gradle 的 `bindReleaseMobilePanel` 任务自动生成 `arm64-v8a` 绑定。Go 链接使用 `-s -w` 省略符号表和调试信息，APK 内的原生库启用压缩。默认产物为 `app/android/app/build/outputs/apk/release/app-release-unsigned.apk`，安装或分发前按发布流程单独签名。
 
 ## 易错点（务必遵守）
 
-- 找不到 `org.lumenfolio.mobilepanel` → Gradle 依赖的 AAR 尚未生成 → 先执行上面的绑定命令。
+- Debug 构建找不到 `org.lumenfolio.mobilepanel` → Debug AAR 尚未生成 → 先执行 Debug 的绑定命令。
+- Release 绑定找不到 `gomobile` 或 `gobind` → 当前终端的 `PATH` 缺少绑定工具目录 → 先完成工具安装和 `PATH` 配置，再从同一终端运行 Gradle。
+- Release 安装时报 `INSTALL_FAILED_NO_MATCHING_ABIS` → APK 只包含 `arm64-v8a` → 在 arm64 设备安装 Release，或在 x86 模拟器使用 Debug。
 - 上传返回 HTTP 404 → 固件可能还没有传图接口 → 换成支持 `POST /frame` 的固件后再试。
 - 读取列表时提示固件不支持浏览 → 当前固件缺少读图接口 → 更新相框固件后刷新列表。
 - 提示 SD 卡未挂载 → 相框当前无法读卡 → 插好 SD 卡并唤醒相框，再刷新列表。
