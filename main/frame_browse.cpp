@@ -1,5 +1,6 @@
 #include "app.h"
 
+#include <cinttypes>
 #include <cstdio>
 #include <cstring>
 
@@ -151,6 +152,47 @@ esp_err_t handle_frame_list(httpd_req_t *request)
     return httpd_resp_send_chunk(request, nullptr, 0);
 }
 
+void format_storage(char *json, size_t size, uint64_t used, uint64_t total)
+{
+    if (total == 0) {
+        snprintf(json, size, "null");
+    } else {
+        snprintf(json, size, "{\"used_bytes\":%" PRIu64 ",\"total_bytes\":%" PRIu64 "}", used, total);
+    }
+}
+
+/** @brief GET /frames/storage 查询两个来源，未能读取的来源返回 null。 */
+esp_err_t handle_frame_storage(httpd_req_t *request)
+{
+    const FrameTransfer transfer;
+    size_t flash_total = artifacts_capacity();
+    size_t flash_used = 0;
+    if (flash_total != 0) {
+        for (const auto &slot : kSlots) {
+            size_t size;
+            const esp_err_t err = artifacts_frame_size(slot.inbox, &size);
+            if (err == ESP_OK) {
+                flash_used += size;
+            } else if (err != ESP_ERR_NOT_FOUND) {
+                flash_total = 0;
+                break;
+            }
+        }
+    }
+
+    uint64_t sd_used = 0, sd_total = 0;
+    if (board_sd_storage(sd_used, sd_total) != ESP_OK) {
+        sd_total = 0;
+    }
+    char flash[80], sd[80], json[192];
+    format_storage(flash, sizeof(flash), flash_used, flash_total);
+    format_storage(sd, sizeof(sd), sd_used, sd_total);
+    snprintf(json, sizeof(json), "{\"artifacts\":%s,\"sd\":%s}", flash, sd);
+    httpd_resp_set_type(request, "application/json");
+    httpd_resp_set_hdr(request, "Cache-Control", "no-store");
+    return httpd_resp_sendstr(request, json);
+}
+
 /** @brief GET /frame 流式返回编码帧，发送中断时关闭连接，避免客户端接收半帧。 */
 esp_err_t handle_frame_download(httpd_req_t *request)
 {
@@ -206,6 +248,7 @@ esp_err_t app_register_frame_browse()
 {
     static const httpd_uri_t routes[] = {
         {.uri = "/frames", .method = HTTP_GET, .handler = handle_frame_list, .user_ctx = nullptr},
+        {.uri = "/frames/storage", .method = HTTP_GET, .handler = handle_frame_storage, .user_ctx = nullptr},
         {.uri = "/frame", .method = HTTP_GET, .handler = handle_frame_download, .user_ctx = nullptr},
     };
     for (const auto &route : routes) {

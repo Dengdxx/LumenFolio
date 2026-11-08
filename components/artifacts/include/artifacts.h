@@ -22,6 +22,9 @@ extern "C" {
 #define ARTIFACTS_FRAME_BYTES   EPD_FRAME_MAX_BYTES
 #define ARTIFACTS_SLOT_BYTES    0x100000u
 
+/** @brief 返回 artifacts 整个分区的容量，分区不存在时返回 0。 */
+size_t artifacts_capacity(void);
+
 /**
  * @brief 从资产分区读取开机画面，完整解码验证后画入 back。
  * @return ESP_OK 成功；ESP_ERR_NOT_FOUND 没有合法帧；其余为读取、解压或缓冲错误。

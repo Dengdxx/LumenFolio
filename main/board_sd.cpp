@@ -54,6 +54,20 @@ bool board_sd_mounted()
     return s_card != nullptr;
 }
 
+esp_err_t board_sd_storage(uint64_t &used, uint64_t &total)
+{
+    std::lock_guard lock(s_sd_mutex);
+    if (s_card == nullptr) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    uint64_t free_bytes;
+    const esp_err_t err = esp_vfs_fat_info(BOARD_SD_MOUNT_POINT, &total, &free_bytes);
+    if (err == ESP_OK) {
+        used = total - free_bytes;
+    }
+    return err;
+}
+
 esp_err_t board_sd_unmount()
 {
     std::lock_guard lock(s_sd_mutex);

@@ -32,6 +32,9 @@ bool board_sd_present();
 /** @brief 文件系统是否已经挂上。 */
 bool board_sd_mounted();
 
+/** @brief 读取已挂载文件系统的已用与总字节数；未挂载返回 ESP_ERR_INVALID_STATE。 */
+esp_err_t board_sd_storage(uint64_t &used, uint64_t &total);
+
 /**
  * @brief 挂载 FATFS 并打印卡信息。
  *

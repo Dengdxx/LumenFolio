@@ -46,6 +46,28 @@ func otaAddress(t *testing.T, server *httptest.Server) (string, string) {
 	return host, port
 }
 
+func TestDeviceStatus(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/ota/status" {
+			t.Errorf("设备状态请求错误：%s %s", r.Method, r.URL)
+		}
+		battery, temperature, humidity := 0, 32.5, 20.4
+		json.NewEncoder(w).Encode(otaStatus{Project: "LumenFolio", Version: "test", ImageID: otaTestID,
+			RunningPartition: "factory", BatteryPercent: &battery, TemperatureC: &temperature,
+			HumidityPct: &humidity, Charge: "charging"})
+	}))
+	defer server.Close()
+	host, portText := otaAddress(t, server)
+	port, err := strconv.Atoi(portText)
+	if err != nil {
+		t.Fatal(err)
+	}
+	status, err := DeviceStatus(t.Context(), host, port)
+	if err != nil || status != "电量 0% · 充电中 · 温度 32.5 °C · 湿度 20.4% RH" {
+		t.Fatalf("设备状态错误：%q，%v", status, err)
+	}
+}
+
 func TestOTASuccessAndLostReplies(t *testing.T) {
 	for _, tc := range []struct {
 		name        string

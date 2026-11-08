@@ -57,6 +57,31 @@ func TestBrowsePictureFromSD(t *testing.T) {
 	if got := preview.NRGBAAt(1, 0); got != panel.Inks()[5].Preview {
 		t.Fatalf("预览第二个像素应为绿色，实际 %v", got)
 	}
+	thumb, err := Thumbnail(t.Context(), host, port, SD, list[0].ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if thumb.Bounds().Dx() != 120 || thumb.Bounds().Dy() != 160 || thumb.NRGBAAt(119, 159) != panel.Inks()[0].Preview {
+		t.Fatalf("缩略图的比例或颜色错误：%v", thumb.Bounds())
+	}
+}
+
+func TestStorage(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/frames/storage" {
+			t.Errorf("容量请求错误：%s %s", r.Method, r.URL)
+		}
+		fmt.Fprint(w, `{"artifacts":{"used_bytes":1450000,"total_bytes":12000000},"sd":null}`)
+	}))
+	defer server.Close()
+	host, port := serverAddress(t, server)
+	storage, err := Storage(t.Context(), host, port)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if storage.Flash.String() != "1 MB/12 MB（12.1%）" || storage.SD.String() != "容量不可用" {
+		t.Fatalf("容量格式错误：%s / %s", storage.Flash, storage.SD)
+	}
 }
 
 func TestListDistinguishesEmptyMissingSDAndOldFirmware(t *testing.T) {

@@ -2,6 +2,7 @@ package org.lumenfolio.android
 
 import android.graphics.BitmapFactory
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -12,10 +13,13 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.FilterChip
@@ -27,12 +31,16 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.semantics.LiveRegionMode
@@ -43,8 +51,14 @@ import androidx.compose.ui.unit.dp
 import java.io.IOException
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import org.lumenfolio.mobilepanel.Mobilepanel
+
+/** Go 读取返回前始终占用一个传输名额，即使列表已切换或退出。 */
+private val thumbnailTransfer = Mutex()
 
 private enum class PictureSource(val id: String, val label: String) {
     ARTIFACTS("artifacts", "Flash artifacts"),
@@ -73,6 +87,8 @@ internal fun DevicePicturesScreen(
     var refresh by remember { mutableStateOf(0) }
     val request = PictureListRequest(host, source, refresh)
     var selected by remember(request) { mutableStateOf<DevicePicture?>(null) }
+    val listState = rememberLazyListState()
+    val thumbnails = remember(request) { mutableStateMapOf<String, ImageBitmap?>() }
     val result = if (request.host.isNotEmpty()) {
         readPicture(request, onSuccess = { onConnected(request.host) }) {
             val list = Mobilepanel.listDevicePictures(request.host, request.source.id)
@@ -81,16 +97,70 @@ internal fun DevicePicturesScreen(
     } else {
         null
     }
+    val infoRequest = request.host to request.refresh
+    val storage = if (request.host.isNotEmpty()) {
+        readPicture(infoRequest) {
+            val capacity = Mobilepanel.deviceStorage(request.host)
+            capacity.flash() to capacity.sd()
+        }
+    } else {
+        null
+    }
+    val (flashCapacity, sdCapacity) = when (storage) {
+        null -> "待读取容量" to "待读取容量"
+        PictureRead.Loading -> "正在读取容量…" to "正在读取容量…"
+        is PictureRead.Success -> storage.value
+        is PictureRead.Failure -> "容量不可用" to "容量不可用"
+    }
+    val status = if (request.host.isNotEmpty()) {
+        readPicture(infoRequest) { Mobilepanel.deviceStatus(request.host) }
+    } else {
+        null
+    }
+
+    if (result is PictureRead.Success && selected == null) {
+        LaunchedEffect(request) {
+            val ids = result.value.mapTo(mutableSetOf()) { it.id }
+            snapshotFlow {
+                listState.layoutInfo.visibleItemsInfo.mapNotNull { item -> (item.key as? String)?.takeIf { it in ids } }
+            }.collectLatest { visibleIds ->
+                for (id in visibleIds) {
+                    if (thumbnails.containsKey(id)) continue
+                    thumbnails[id] = try {
+                        thumbnailTransfer.withLock {
+                            withContext(Dispatchers.IO) {
+                                val png = Mobilepanel.thumbnailDevicePicture(request.host, request.source.id, id)
+                                BitmapFactory.decodeByteArray(png, 0, png.size)?.asImageBitmap()
+                            }
+                        }
+                    } catch (error: CancellationException) {
+                        throw error
+                    } catch (_: Exception) {
+                        null
+                    }
+                }
+            }
+        }
+    }
 
     Box(modifier, contentAlignment = Alignment.TopCenter) {
         LazyColumn(
             modifier = Modifier.widthIn(max = 560.dp).fillMaxSize(),
+            state = listState,
             contentPadding = PaddingValues(horizontal = 16.dp, vertical = 20.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             item {
                 Panel {
                     Text("相框图片", style = MaterialTheme.typography.titleMedium)
+                    PictureMessage(
+                        when (status) {
+                            null -> "待读取相框状态"
+                            PictureRead.Loading -> "正在读取相框状态…"
+                            is PictureRead.Success -> status.value
+                            is PictureRead.Failure -> "相框状态不可用"
+                        },
+                    )
                     FrameAddressField(address, onAddressChange = { value ->
                         onAddressChange(value)
                         host = ""
@@ -106,6 +176,10 @@ internal fun DevicePicturesScreen(
                                 label = { Text(option.label) },
                             )
                         }
+                    }
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        PictureMessage("Flash artifacts $flashCapacity")
+                        PictureMessage("SD 卡 $sdCapacity")
                     }
                     Button(
                         onClick = {
@@ -129,6 +203,24 @@ internal fun DevicePicturesScreen(
                     if (result.value.isEmpty()) item { PictureMessage("${source.label}中没有图片。") }
                     items(result.value, key = { it.id }) { picture ->
                         ListItem(
+                            leadingContent = {
+                                Box(
+                                    modifier = Modifier.size(54.dp, 72.dp)
+                                        .clip(RoundedCornerShape(6.dp))
+                                        .background(MaterialTheme.colorScheme.surfaceVariant),
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    val thumbnail = thumbnails[picture.id]
+                                    if (thumbnail != null) {
+                                        Image(thumbnail, contentDescription = null, modifier = Modifier.fillMaxSize())
+                                    } else {
+                                        Text(
+                                            if (thumbnails.containsKey(picture.id)) "—" else "…",
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        )
+                                    }
+                                }
+                            },
                             headlineContent = {
                                 Text(picture.name, maxLines = 2, overflow = TextOverflow.Ellipsis)
                             },

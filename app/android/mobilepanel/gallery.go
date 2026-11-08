@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"lumenfolio/gallery"
+	"lumenfolio/ota"
 )
 
 const devicePort = 8080
@@ -38,4 +39,38 @@ func PreviewDevicePicture(host, source, id string) ([]byte, error) {
 		return nil, err
 	}
 	return encodePreview(pixels)
+}
+
+// ThumbnailDevicePicture 为列表读取一张缩略图 PNG，由 Android 在后台调用。
+func ThumbnailDevicePicture(host, source, id string) ([]byte, error) {
+	pixels, err := gallery.Thumbnail(context.Background(), host, devicePort, gallery.Source(source), id)
+	if err != nil {
+		return nil, err
+	}
+	return encodePreview(pixels)
+}
+
+// StorageInfo 持有一次读取返回的两种存储容量，由 Android 按来源显示。
+type StorageInfo struct {
+	usage gallery.StorageUsage
+}
+
+// Flash 返回 Flash artifacts 区的容量文本。
+func (s *StorageInfo) Flash() string { return s.usage.Flash.String() }
+
+// SD 返回 SD 卡的容量文本。
+func (s *StorageInfo) SD() string { return s.usage.SD.String() }
+
+// DeviceStorage 读取 Flash 和 SD 卡容量，由 Android 在后台调用。
+func DeviceStorage(host string) (*StorageInfo, error) {
+	usage, err := gallery.Storage(context.Background(), host, devicePort)
+	if err != nil {
+		return nil, err
+	}
+	return &StorageInfo{usage: usage}, nil
+}
+
+// DeviceStatus 读取板端电量、充电状态和温湿度，由 Android 在后台调用。
+func DeviceStatus(host string) (string, error) {
+	return ota.DeviceStatus(context.Background(), host, devicePort)
 }

@@ -1,4 +1,4 @@
-// Package gallery 只读浏览相框 Flash 和 SD 卡中的面板帧，由 Windows 和 Android 共用。
+// Package gallery 浏览相框 Flash 和 SD 卡中的面板帧与存储信息。
 package gallery
 
 import (
@@ -13,6 +13,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"golang.org/x/image/draw"
 
 	"lumenfolio/panel"
 )
@@ -29,6 +31,28 @@ const (
 type Picture struct {
 	ID   string `json:"id"`
 	Name string `json:"name"`
+}
+
+// Usage 是一个存储区的占用字节数和总字节数。总量为零表示容量不可用。
+type Usage struct {
+	UsedBytes  uint64 `json:"used_bytes"`
+	TotalBytes uint64 `json:"total_bytes"`
+}
+
+// String 用十进制 MB 显示容量，百分比从未舍入的字节数计算。
+func (u Usage) String() string {
+	if u.TotalBytes == 0 {
+		return "容量不可用"
+	}
+	const mb = 1_000_000
+	return fmt.Sprintf("%d MB/%d MB（%.1f%%）", (u.UsedBytes+mb/2)/mb, (u.TotalBytes+mb/2)/mb,
+		100*float64(u.UsedBytes)/float64(u.TotalBytes))
+}
+
+// StorageUsage 是 Flash artifacts 和 SD 卡的容量快照。两区可以分别不可用。
+type StorageUsage struct {
+	Flash Usage `json:"artifacts"`
+	SD    Usage `json:"sd"`
 }
 
 var client = &http.Client{
@@ -65,9 +89,7 @@ func List(ctx context.Context, host string, port int, source Source) ([]Picture,
 
 // Preview 读取指定存储中的一帧并解码为完整的六色预览，不修改相框画面。
 func Preview(ctx context.Context, host string, port int, source Source, id string) (*image.NRGBA, error) {
-	query := url.Values{"source": {string(source)}, "id": {id}}
-	// ESP-IDF 返回原始查询串，由固件解码。空格按百分号编码，和文件名里的加号区分。
-	body, err := get(ctx, host, port, "/frame", query, panel.FrameBytes,
+	body, err := get(ctx, host, port, "/frame", url.Values{"source": {string(source)}, "id": {id}}, panel.FrameBytes,
 		"相框上已找不到这张图片，请刷新列表")
 	if err != nil {
 		return nil, err
@@ -75,11 +97,37 @@ func Preview(ctx context.Context, host string, port int, source Source, id strin
 	return panel.DecodeFrame(body)
 }
 
-// get 直连局域网相框。响应超过列表或帧格式允许的上限时停止读取。
+// Thumbnail 读取现有面板帧，以面积加权的缩放生成 120×160 列表预览。
+func Thumbnail(ctx context.Context, host string, port int, source Source, id string) (*image.NRGBA, error) {
+	full, err := Preview(ctx, host, port, source, id)
+	if err != nil {
+		return nil, err
+	}
+	thumb := image.NewNRGBA(image.Rect(0, 0, panel.Width/10, panel.Height/10))
+	draw.BiLinear.Scale(thumb, thumb.Bounds(), full, full.Bounds(), draw.Src, nil)
+	return thumb, nil
+}
+
+// Storage 读取两种存储的容量，SD 未挂载时该项的总量为零。
+func Storage(ctx context.Context, host string, port int) (StorageUsage, error) {
+	body, err := get(ctx, host, port, "/frames/storage", nil, 1024,
+		"相框固件暂不支持读取容量")
+	if err != nil {
+		return StorageUsage{}, err
+	}
+	var usage StorageUsage
+	if err := json.Unmarshal(body, &usage); err != nil {
+		return StorageUsage{}, fmt.Errorf("读取存储容量：%w", err)
+	}
+	return usage, nil
+}
+
+// get 直连局域网相框，并按接口允许的字节数限制响应。
 func get(ctx context.Context, host string, port int, path string, query url.Values, limit int, missing string) ([]byte, error) {
 	if port < 1 || port > 65535 {
 		return nil, fmt.Errorf("端口超出范围：%d", port)
 	}
+	// ESP-IDF 返回原始查询串。百分号编码空格，和文件名里的加号区分。
 	endpoint := url.URL{Scheme: "http", Host: net.JoinHostPort(host, strconv.Itoa(port)), Path: path,
 		RawQuery: strings.ReplaceAll(query.Encode(), "+", "%20")}
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint.String(), nil)

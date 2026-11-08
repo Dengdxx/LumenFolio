@@ -182,7 +182,7 @@ func newUI(shaper *text.Shaper, initialFile string) *ui {
 }
 
 func (u *ui) run(w *app.Window) error {
-	defer u.gallery.cancelRequest()
+	defer u.closeGallery()
 	u.window = w
 	u.explorer = explorer.NewExplorer(w)
 	if u.initialFile != "" {
@@ -255,6 +255,9 @@ func (u *ui) applyPendingResults() (changed bool) {
 			u.fileBusy = false
 			u.status = text
 			changed = true
+		case result := <-u.gallery.results:
+			u.gallery.applyResult(result)
+			changed = true
 		case update := <-u.ota.updates:
 			u.ota.progress = update.progress
 			if update.firmware != nil {
@@ -317,11 +320,6 @@ func (u *ui) triggerDither() {
 
 func (u *ui) layout(gtx layout.Context) layout.Dimensions {
 	paint.Fill(gtx.Ops, u.colors.background)
-	select {
-	case result := <-u.gallery.results:
-		u.gallery.applyResult(result)
-	default:
-	}
 	if u.gallery.host != "" {
 		return u.galleryLayout(gtx)
 	}
@@ -523,6 +521,14 @@ func (u *ui) algorithm(index int, name string) layout.Widget {
 
 // choice 在列表内撑满宽度，并沿用手机端选中色。
 func (u *ui) choice(gtx layout.Context, clickable *widget.Clickable, label string, selected bool) layout.Dimensions {
+	return u.choiceLayout(gtx, clickable, selected, func(gtx layout.Context, foreground color.NRGBA) layout.Dimensions {
+		l := material.Body1(u.theme, label)
+		l.Color = foreground
+		return l.Layout(gtx)
+	})
+}
+
+func (u *ui) choiceLayout(gtx layout.Context, clickable *widget.Clickable, selected bool, content func(layout.Context, color.NRGBA) layout.Dimensions) layout.Dimensions {
 	gtx.Constraints.Min.X = gtx.Constraints.Max.X
 	return clickable.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 		bg, fg := u.colors.surface, u.colors.text
@@ -534,11 +540,7 @@ func (u *ui) choice(gtx layout.Context, clickable *widget.Clickable, label strin
 		}
 		macro := op.Record(gtx.Ops)
 		dims := layout.Inset{Top: unit.Dp(7), Bottom: unit.Dp(7), Left: unit.Dp(12), Right: unit.Dp(12)}.Layout(gtx,
-			func(gtx layout.Context) layout.Dimensions {
-				l := material.Body1(u.theme, label)
-				l.Color = fg
-				return l.Layout(gtx)
-			})
+			func(gtx layout.Context) layout.Dimensions { return content(gtx, fg) })
 		call := macro.Stop()
 
 		size := image.Point{X: gtx.Constraints.Max.X, Y: dims.Size.Y}

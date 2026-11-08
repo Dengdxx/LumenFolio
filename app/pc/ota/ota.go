@@ -137,6 +137,36 @@ func getOTAStatus(ctx context.Context, client *http.Client, base string) (otaSta
 	return decodeOTAResponse(response)
 }
 
+// DeviceStatus 读取设备的电量、充电和环境状态。还未采样的指标显示为占位符。
+func DeviceStatus(ctx context.Context, host string, port int) (string, error) {
+	client, base := newOTAClient(host, port)
+	defer client.CloseIdleConnections()
+	status, err := getOTAStatus(ctx, client, base)
+	if err != nil {
+		return "", err
+	}
+	battery, temperature, humidity := "—", "—", "—"
+	if status.BatteryPercent != nil {
+		battery = fmt.Sprintf("%d%%", *status.BatteryPercent)
+	}
+	if status.TemperatureC != nil {
+		temperature = fmt.Sprintf("%.1f °C", *status.TemperatureC)
+	}
+	if status.HumidityPct != nil {
+		humidity = fmt.Sprintf("%.1f%% RH", *status.HumidityPct)
+	}
+	charge := "充电状态未知"
+	switch status.Charge {
+	case "charging":
+		charge = "充电中"
+	case "full":
+		charge = "已充满"
+	case "idle":
+		charge = "未接充电"
+	}
+	return fmt.Sprintf("电量 %s · %s · 温度 %s · 湿度 %s", battery, charge, temperature, humidity), nil
+}
+
 // confirmOTA 以 3 秒超时请求 POST base/ota/confirm。
 //
 // 通过 X-OTA-Partition、X-OTA-Version、X-OTA-Image 头携带目标槽、版本和镜像标识，

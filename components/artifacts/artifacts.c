@@ -32,6 +32,12 @@ static const esp_partition_t *artifacts_partition(void)
     return part;
 }
 
+size_t artifacts_capacity(void)
+{
+    const esp_partition_t *part = artifacts_partition();
+    return part == NULL ? 0 : part->size;
+}
+
 typedef struct {
     const esp_partition_t *part;
     size_t base;

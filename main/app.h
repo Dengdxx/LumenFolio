@@ -63,5 +63,5 @@ void app_frame_transfer_begin(void);
  */
 void app_frame_transfer_end(void);
 
-/** @brief HTTP 服务启动后注册设备画面列表和预览接口。 */
+/** @brief HTTP 服务启动后注册设备画面列表、容量和预览接口。 */
 esp_err_t app_register_frame_browse(void);
