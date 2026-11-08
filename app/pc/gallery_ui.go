@@ -20,14 +20,15 @@ import (
 
 // galleryBrowser 的视图状态由窗口事件循环独占。后台请求只发送不可变的结果。
 type galleryBrowser struct {
-	openButton    widget.Clickable
-	closeButton   widget.Clickable
-	flashButton   widget.Clickable
-	sdButton      widget.Clickable
-	refreshButton widget.Clickable
-	displayButton widget.Clickable
-	buttons       []widget.Clickable
-	list          layout.List
+	openButton        widget.Clickable
+	closeButton       widget.Clickable
+	flashButton       widget.Clickable
+	sdButton          widget.Clickable
+	refreshInfoButton widget.Clickable
+	refreshListButton widget.Clickable
+	displayButton     widget.Clickable
+	buttons           []widget.Clickable
+	list              layout.List
 
 	host          string
 	source        gallery.Source
@@ -292,9 +293,10 @@ func (u *ui) galleryHeader(gtx layout.Context) layout.Dimensions {
 			layout.Rigid(gap(8)),
 			layout.Rigid(u.gallerySourceButton("SD 卡", sdUsage, &g.sdButton, gallery.SD)),
 			layout.Rigid(gap(12)),
-			layout.Rigid(u.tabButton("刷新", &g.refreshButton, false, func() {
+			layout.Rigid(u.tabButton("刷新状态", &g.refreshInfoButton, false, u.loadGalleryInfo)),
+			layout.Rigid(gap(8)),
+			layout.Rigid(u.tabButton("刷新列表", &g.refreshListButton, false, func() {
 				u.loadGallery(g.source)
-				u.loadGalleryInfo()
 			})),
 		)
 	})

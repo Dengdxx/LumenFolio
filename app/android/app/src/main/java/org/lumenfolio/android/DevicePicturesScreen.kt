@@ -27,6 +27,7 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -87,8 +88,9 @@ internal fun DevicePicturesScreen(
     val focusManager = LocalFocusManager.current
     var host by remember { mutableStateOf(address.trim()) }
     var source by rememberSaveable { mutableStateOf(PictureSource.ARTIFACTS) }
-    var refresh by remember { mutableStateOf(0) }
-    val request = PictureListRequest(host, source, refresh)
+    var listRefresh by remember { mutableStateOf(0) }
+    var infoRefresh by remember { mutableStateOf(0) }
+    val request = PictureListRequest(host, source, listRefresh)
     var selected by remember(request) { mutableStateOf<DevicePicture?>(null) }
     val listState = rememberLazyListState()
     val thumbnails = remember(request) { mutableStateMapOf<String, ImageBitmap?>() }
@@ -100,10 +102,10 @@ internal fun DevicePicturesScreen(
     } else {
         null
     }
-    val infoRequest = request.host to request.refresh
-    val storage = if (request.host.isNotEmpty()) {
+    val infoRequest = host to infoRefresh
+    val storage = if (host.isNotEmpty()) {
         readPicture(infoRequest) {
-            val capacity = Mobilepanel.deviceStorage(request.host)
+            val capacity = Mobilepanel.deviceStorage(infoRequest.first)
             capacity.flash() to capacity.sd()
         }
     } else {
@@ -115,8 +117,8 @@ internal fun DevicePicturesScreen(
         is PictureRead.Success -> storage.value
         is PictureRead.Failure -> "容量不可用" to "容量不可用"
     }
-    val status = if (request.host.isNotEmpty()) {
-        readPicture(infoRequest) { Mobilepanel.deviceStatus(request.host) }
+    val status = if (host.isNotEmpty()) {
+        readPicture(infoRequest) { Mobilepanel.deviceStatus(infoRequest.first) }
     } else {
         null
     }
@@ -184,16 +186,30 @@ internal fun DevicePicturesScreen(
                         PictureMessage("Flash artifacts $flashCapacity")
                         PictureMessage("SD 卡 $sdCapacity")
                     }
-                    Button(
-                        onClick = {
-                            focusManager.clearFocus()
-                            host = address.trim()
-                            refresh++
-                        },
-                        enabled = address.isNotBlank() && result != PictureRead.Loading,
+                    Row(
                         modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
-                        Text(if (host.isEmpty()) "读取列表" else "刷新列表")
+                        Button(
+                            onClick = {
+                                focusManager.clearFocus()
+                                host = address.trim()
+                                listRefresh++
+                            },
+                            enabled = address.isNotBlank() && result != PictureRead.Loading,
+                            modifier = Modifier.weight(1f),
+                        ) {
+                            Text(if (host.isEmpty()) "读取列表" else "刷新列表")
+                        }
+                        if (host.isNotEmpty()) {
+                            OutlinedButton(
+                                onClick = { infoRefresh++ },
+                                enabled = storage != PictureRead.Loading && status != PictureRead.Loading,
+                                modifier = Modifier.weight(1f),
+                            ) {
+                                Text("刷新状态")
+                            }
+                        }
                     }
                 }
             }

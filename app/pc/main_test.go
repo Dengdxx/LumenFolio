@@ -11,14 +11,45 @@ import (
 	"gioui.org/io/pointer"
 	"gioui.org/layout"
 	"gioui.org/op"
+	"gioui.org/op/paint"
 	"gioui.org/text"
 	"gioui.org/unit"
 
+	"lumenfolio/gallery"
 	"lumenfolio/panel"
 )
 
 func newTestUI() *ui {
 	return newUI(text.NewShaper(text.NoSystemFonts(), text.WithCollection(gofont.Collection())), "")
+}
+
+func TestGalleryStatusRefreshKeepsPictures(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		u := newTestUI()
+		u.window = &waitingWindow{wake: make(chan struct{}, 1)}
+		g := &u.gallery
+		// 测试点击后的状态变化，非法地址让后台请求在发网前返回。
+		g.host = "invalid host"
+		g.pictures = []gallery.Picture{{ID: "boot", Name: "开机画面"}}
+		g.selected = "boot"
+		img := paint.NewImageOp(image.NewNRGBA(image.Rect(0, 0, 12, 16)))
+		g.thumbnails = map[string]paint.ImageOp{"boot": img}
+		g.preview = img
+		g.list.Position.Offset = 7
+
+		g.refreshInfoButton.Click()
+		var ops op.Ops
+		u.galleryHeader(layout.Context{Ops: &ops, Metric: unit.Metric{PxPerDp: 1, PxPerSp: 1}, Constraints: layout.Exact(image.Pt(900, 90))})
+		defer g.cancelInfoRequest()
+
+		if g.infoRequest == nil || g.request != nil {
+			t.Fatal("刷新状态应只发起设备信息请求")
+		}
+		if len(g.pictures) != 1 || g.selected != "boot" || g.list.Position.Offset != 7 ||
+			g.thumbnails["boot"].Size() != img.Size() || g.preview.Size() != img.Size() {
+			t.Fatal("刷新状态应保留列表、滚动位置、选中项和预览")
+		}
+	})
 }
 
 func TestCropPointerGestures(t *testing.T) {
