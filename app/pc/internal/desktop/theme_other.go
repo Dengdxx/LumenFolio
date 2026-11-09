@@ -1,6 +1,6 @@
 //go:build !windows
 
-package main
+package desktop
 
 func systemPrefersDark() bool {
 	return true

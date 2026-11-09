@@ -1,4 +1,4 @@
-package main
+package cli
 
 import (
 	"bytes"
@@ -42,7 +42,7 @@ func TestExportWritesOneFrame(t *testing.T) {
 	}
 	dst := filepath.Join(dir, "out.bin")
 	var out, errOut bytes.Buffer
-	if code := run(context.Background(), []string{"export", "--alg", "0", srcPath, dst}, &out, &errOut); code != 0 {
+	if code := Run(context.Background(), []string{"export", "--alg", "0", srcPath, dst}, &out, &errOut); code != 0 {
 		t.Fatalf("code=%d out=%s err=%s", code, &out, &errOut)
 	}
 	got, err := os.ReadFile(dst)
@@ -85,7 +85,7 @@ func TestFrameCommandPostsCurrentPicture(t *testing.T) {
 		t.Fatal(err)
 	}
 	var out, errOut bytes.Buffer
-	code := run(context.Background(), []string{"--host", host, "frame", "--http-port", portText, "--alg", "0", srcPath}, &out, &errOut)
+	code := Run(context.Background(), []string{"--host", host, "frame", "--http-port", portText, "--alg", "0", srcPath}, &out, &errOut)
 	if code != 0 {
 		t.Fatalf("code=%d out=%s err=%s", code, &out, &errOut)
 	}

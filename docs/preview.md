@@ -4,17 +4,17 @@ LumenFolio 桌面端在 Windows 上以一个 exe 提供图形界面和命令行�
 
 ## 代码边界
 
-桌面端源码在 `app/pc/`，Go 模块名为 `lumenfolio`。界面和命令行共用能力，不共用窗口。两边都要调用的代码放在不引用 `gioui.org` 的包里；只服务于指针、字体、控件和布局的代码留在主包。
+桌面端源码在 `app/pc/`，Go 模块名为 `lumenfolio`。根目录的 `main.go` 根据参数启动窗口或命令行。Windows 图标资源也留在根包，供原有构建命令直接链接到 EXE。
 
+- `app/pc/internal/desktop`：Gio 窗口、编辑器、图库和固件升级界面。窗口事件循环管理界面状态，只有窗口入口会在主 goroutine 调用 `app.Main`。
+- `app/pc/internal/cli`：解析命令行参数、执行子命令并输出结果。CLI 包可独立测试。
+- `app/pc/internal/picture`：桌面界面和 CLI 共用的图片编码及上传操作。两种入口各自处理文件选择和输出。
 - `app/pc/panel`：取景、按取景框采样、六色抖动和帧编解码。编码压得更小时是 EPD2，否则是 EPD1。解码直接用相同的墨水近似色还原设备帧，保留设备保存的像素。墨水索引与固件帧缓冲的半字节一致。
 - `app/pc/frame`：把一整帧 POST 到设备的 `/frame`。界面的「上传到相框」和命令行的 `frame` 都调用它。
 - `app/pc/gallery`：读取 Flash artifacts 或 SD 卡中的帧清单和六色预览，供 Windows 和 Android 配套 App 共用。
 - `app/pc/ota`：查询 `/ota/status`、上传应用镜像、等待重启并确认。Windows 和 Android 的「固件升级」以及命令行的 `ota` 子命令共用这个包。
-- 主包（`ui.go`、`gallery_ui.go`、`ota_ui.go`、`gesture.go`、`send.go`）：窗口、字体、控件、布局、屏幕坐标、拖拽和应用层操作。`app.Main` 只在打开界面时由主 goroutine 调用，命令行路径不进入它。
 
-这样分是因为 Gio 的事件循环会占住进程。共用包一旦引用 Gio，只跑命令行也会链进界面运行时。Go 也不允许在主包给 `panel.Crop` 增加方法，所以屏幕上的平移和旋转是主包函数，算完再调用 `Move`、`RotateAroundFrameCenter`、`Zoom`。
-
-之后从界面或命令行加能力，先放进这种不引用 Gio 的包，再由两边各自调用。不要在 `ui.go` 里再写一套采样、抖动、编码或上传。
+Gio 依赖集中在 `internal/desktop`，让 CLI 和共用包能脱离窗口单独运行与测试。屏幕坐标由桌面端换算，再调用 `panel.Crop` 的平移、旋转和缩放方法。新增采样、抖动、编码或传输逻辑时沿用对应的共用包。
 
 ## 易错点（务必遵守）
 
@@ -119,7 +119,7 @@ go -C app/pc test -p=1 ./...
 go -C app/pc vet -p=1 ./...
 ```
 
-取景、抖动和帧编码的测试在 `app/pc/panel`，传图在 `app/pc/frame`，固件上传在 `app/pc/ota`，指针手势和导出命令在主包。上面的 `./...` 会一起跑，覆盖取景变换、透明度与白底合成、六色抖动、EPD2 无损还原与 EPD1 回退、非法帧拒绝、实际传输长度、导出字节数、鼠标事件路由、后台结果交付和完整预览显示。并发交付使用 `testing/synctest` 控制任务时序，不依赖真实时间休眠。离屏绘制测试覆盖普通窗口、不同留边和高 DPI；无法创建 GPU 后端时会标记跳过，不能把跳过视为已验证显示效果。
+取景、抖动和帧编码的测试在 `app/pc/panel`，传图在 `app/pc/frame`，固件上传在 `app/pc/ota`。指针手势、预览与后台结果交付的测试在 `app/pc/internal/desktop`，命令行传图和导出在 `app/pc/internal/cli`。上面的 `./...` 会一起跑，覆盖取景变换、透明度与白底合成、六色抖动、EPD2 无损还原与 EPD1 回退、非法帧拒绝、实际传输长度、导出字节数、鼠标事件路由和完整预览显示。并发交付使用 `testing/synctest` 控制任务时序，不依赖真实时间休眠。离屏绘制测试覆盖普通窗口、不同留边和高 DPI。无法创建 GPU 后端时会标记跳过。
 
 Python 产帧工具的六色色码、高低半字节顺序、原始帧回退与尺寸边界：
 

@@ -1,4 +1,4 @@
-package main
+package desktop
 
 import (
 	"bytes"
@@ -8,9 +8,9 @@ import (
 	"math"
 	"testing"
 
-	"lumenfolio/panel"
 	"gioui.org/f32"
 	"gioui.org/io/pointer"
+	"lumenfolio/panel"
 )
 
 func TestPanByScreenDelta(t *testing.T) {

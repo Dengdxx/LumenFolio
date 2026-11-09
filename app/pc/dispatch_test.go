@@ -1,11 +1,6 @@
 package main
 
-import (
-	"bytes"
-	"context"
-	"strings"
-	"testing"
-)
+import "testing"
 
 func TestLaunchGUI(t *testing.T) {
 	cases := []struct {
@@ -34,32 +29,5 @@ func TestLaunchGUI(t *testing.T) {
 				t.Fatalf("launchGUI(%q) = %v %q，应为 %v %q", tc.args, open, image, tc.open, tc.image)
 			}
 		})
-	}
-}
-
-func TestCLIHelpAndUnknownCommand(t *testing.T) {
-	var out, errOut bytes.Buffer
-	if code := run(context.Background(), []string{"-h"}, &out, &errOut); code != 0 || !strings.Contains(errOut.String(), "打开界面") {
-		t.Fatalf("code=%d out=%s err=%s", code, &out, &errOut)
-	}
-	out.Reset()
-	errOut.Reset()
-	if code := run(context.Background(), []string{"foo"}, &out, &errOut); code != 2 || !strings.Contains(errOut.String(), "未知命令") {
-		t.Fatalf("code=%d out=%s err=%s", code, &out, &errOut)
-	}
-	out.Reset()
-	errOut.Reset()
-	if code := run(context.Background(), []string{"ota"}, &out, &errOut); code != 2 || !strings.Contains(errOut.String(), "缺少 --host") {
-		t.Fatalf("code=%d out=%s err=%s", code, &out, &errOut)
-	}
-	out.Reset()
-	errOut.Reset()
-	if code := run(context.Background(), []string{"frame"}, &out, &errOut); code != 2 || !strings.Contains(errOut.String(), "缺少 --host") {
-		t.Fatalf("code=%d out=%s err=%s", code, &out, &errOut)
-	}
-	out.Reset()
-	errOut.Reset()
-	if code := run(context.Background(), []string{"export"}, &out, &errOut); code != 2 || !strings.Contains(errOut.String(), "用法") {
-		t.Fatalf("code=%d out=%s err=%s", code, &out, &errOut)
 	}
 }

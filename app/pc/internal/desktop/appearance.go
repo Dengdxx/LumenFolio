@@ -1,4 +1,4 @@
-package main
+package desktop
 
 import (
 	"bytes"
@@ -14,7 +14,7 @@ import (
 	"gioui.org/unit"
 )
 
-//go:embed branding/lumen-folio-icon.png
+//go:embed lumen-folio-icon.png
 var brandIconPNG []byte
 
 var brandIcon = sync.OnceValue(func() paint.ImageOp {

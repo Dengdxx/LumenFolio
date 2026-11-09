@@ -29,7 +29,7 @@ def main() -> None:
                 cwd=work,
                 check=True,
             )
-        shutil.copyfile(source, branding / source.name)
+        shutil.copyfile(source, pc / "internal" / "desktop" / source.name)
         for arch in machines:
             output = f"icon_windows_{arch}.syso"
             shutil.copyfile(work / output, pc / output)
