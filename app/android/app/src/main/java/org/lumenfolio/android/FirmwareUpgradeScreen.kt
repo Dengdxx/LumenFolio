@@ -56,7 +56,13 @@ internal fun FirmwareUpgradeScreen(
                     "唤醒相框并通过局域网或蓝牙连接，然后选择下载好的 LumenFolio 应用固件。",
                     style = MaterialTheme.typography.bodyMedium,
                 )
-                FrameConnectionField(model.address, model.bluetooth, model::editAddress, onBluetooth, enabled = !model.busy)
+                FrameConnectionField(
+                    model.address, model.bluetooth, model.frameIdentity, model::editAddress, onBluetooth,
+                    enabled = !model.busy,
+                )
+                model.identityNotice?.let {
+                    Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                }
                 OutlinedButton(
                     onClick = {
                         focus.clearFocus()

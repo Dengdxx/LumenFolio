@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"lumenfolio/devicehttp"
+	"lumenfolio/identity"
 )
 
 const (
@@ -51,6 +52,7 @@ type otaStatus struct {
 	Charge         string   `json:"charge,omitempty"`          // charging / full / idle / unknown
 	TemperatureC   *float64 `json:"temperature_c,omitempty"`   // 环境温度，摄氏度
 	HumidityPct    *float64 `json:"humidity_pct,omitempty"`    // 相对湿度，百分比
+	DeviceID       string   `json:"id,omitempty"`              // 基 MAC；旧固件缺省
 }
 
 // otaImage 是从应用镜像头提取的标识信息。
@@ -150,6 +152,18 @@ func getOTAStatus(ctx context.Context, client *http.Client, base string) (otaSta
 		return otaStatus{}, err
 	}
 	return decodeOTAResponse(response)
+}
+
+// DeviceID 读取相框的固定身份。旧固件不报 id 时返回空串。
+func DeviceID(ctx context.Context, host string, port int) (identity.ID, error) {
+	client, base := newOTAClient(host, port)
+	defer client.CloseIdleConnections()
+	request, cancel, err := otaControlRequest(ctx, http.MethodGet, base+"/ota/status")
+	if err != nil {
+		return "", err
+	}
+	defer cancel()
+	return identity.Read(request.Context(), client, base+"/ota/status")
 }
 
 // DeviceStatus 读取设备的电量、充电和环境状态。还未采样的指标显示为占位符。

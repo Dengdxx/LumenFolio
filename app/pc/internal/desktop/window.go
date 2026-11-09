@@ -88,20 +88,21 @@ type ui struct {
 	algButtons   []widget.Clickable
 	algList      layout.List
 
-	mode      viewMode
-	crop      panel.Crop
-	alg       int
-	rawImage  image.Image  // 打开的原始图片
-	source    *image.NRGBA // 按取景框采样出的 1200×1600 图
-	preview   *image.NRGBA // 抖动结果
-	name      string
-	status    string
-	rendering bool // 当前构图和算法的六色预览正在计算
-	fileBusy  bool // 文件操作与升级互斥，由 UI 事件循环维护
-	upload    uploadPanel
-	gallery   galleryBrowser
-	ota       otaPage
-	bluetooth bluetoothPage
+	mode       viewMode
+	crop       panel.Crop
+	alg        int
+	rawImage   image.Image  // 打开的原始图片
+	source     *image.NRGBA // 按取景框采样出的 1200×1600 图
+	preview    *image.NRGBA // 抖动结果
+	name       string
+	status     string
+	rendering  bool // 当前构图和算法的六色预览正在计算
+	fileBusy   bool // 文件操作与升级互斥，由 UI 事件循环维护
+	upload     uploadPanel
+	gallery    galleryBrowser
+	ota        otaPage
+	bluetooth  bluetoothPage
+	remembered rememberedFrame
 
 	// 交互状态
 	canvasTag bool
@@ -152,6 +153,10 @@ func newUI(shaper *text.Shaper, initialFile string) *ui {
 		bluetooth: bluetoothPage{results: make(chan bluetoothResult, 1)},
 	}
 	ui.hostEditor.SingleLine = true
+	ui.remembered = loadRememberedFrame()
+	if ui.remembered.Address != "" {
+		ui.hostEditor.SetText(ui.remembered.Address)
+	}
 	return ui
 }
 
@@ -235,7 +240,7 @@ func (u *ui) applyPendingResults() (changed bool) {
 			u.status = text
 			changed = true
 		case result := <-u.upload.storageResults:
-			changed = u.upload.applyStorage(result) || changed
+			changed = u.applyStorage(result) || changed
 		case update := <-u.upload.updates:
 			u.upload.progress = update.progress
 			if update.finished {
@@ -246,6 +251,9 @@ func (u *ui) applyPendingResults() (changed bool) {
 			}
 			changed = true
 		case result := <-u.gallery.results:
+			if result.err == nil && result.frameID != "" {
+				u.rememberFrame(result.frameID, u.gallery.host)
+			}
 			if u.gallery.applyResult(result) {
 				u.loadGallery(u.gallery.source)
 				u.loadGalleryInfo()

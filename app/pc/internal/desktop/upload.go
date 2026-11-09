@@ -11,6 +11,7 @@ import (
 
 	"lumenfolio/frame"
 	"lumenfolio/gallery"
+	"lumenfolio/identity"
 	"lumenfolio/internal/picture"
 )
 
@@ -34,6 +35,7 @@ type uploadPanel struct {
 type uploadStorageResult struct {
 	probe       context.Context
 	sdAvailable bool
+	id          identity.ID
 	err         error
 }
 
@@ -63,13 +65,17 @@ func (p *uploadPanel) close() {
 	}
 }
 
-func (p *uploadPanel) applyStorage(result uploadStorageResult) bool {
+func (u *ui) applyStorage(result uploadStorageResult) bool {
+	p := &u.upload
 	if result.probe != p.probe {
 		return false
 	}
 	p.stopProbe()
 	p.probeFailed = result.err != nil
 	p.sdAvailable = !p.probeFailed && result.sdAvailable
+	if result.err == nil {
+		u.rememberFrame(result.id, p.host)
+	}
 	return true
 }
 
@@ -106,7 +112,11 @@ func (u *ui) checkUploadStorage(delay time.Duration) {
 			}
 		}
 		storage, err := gallery.Storage(ctx, host, 8080)
-		result := uploadStorageResult{probe: ctx, sdAvailable: storage.SD.TotalBytes != 0, err: err}
+		var id identity.ID
+		if err == nil {
+			id, err = u.identifyWiFi(ctx, host)
+		}
+		result := uploadStorageResult{probe: ctx, sdAvailable: storage.SD.TotalBytes != 0, id: id, err: err}
 		select {
 		case p.storageResults <- result:
 			if u.window != nil {

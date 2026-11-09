@@ -124,7 +124,7 @@ Invoke-RestMethod -Method Post -Uri "$device/ota/confirm" -Headers @{
 
 状态 JSON 字段：`phase`、`ready`、`pending_verify`、`project`、`version`、`image_id`、`running_partition`、`boot_partition`、`update_partition`、`capacity`、`received`、`total`、`last_error`。
 
-状态还可包含 `battery_mv`、`battery_percent`、`charge`、`temperature_c`、`humidity_pct`。对应传感器尚无采样时，相关字段缺省。
+状态还可包含 `id`、`battery_mv`、`battery_percent`、`charge`、`temperature_c`、`humidity_pct`。`id` 是芯片出厂基 MAC，形如 `7c:df:a1:e2:3f:28`，Wi-Fi 和蓝牙连的是不是同一台靠它区分；读不到时字段缺省。传感器尚无采样时，对应字段缺省。
 
 | phase | 含义 |
 | --- | --- |

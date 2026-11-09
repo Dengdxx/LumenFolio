@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"lumenfolio/gallery"
+	"lumenfolio/identity"
 	"lumenfolio/ota"
 )
 
@@ -113,4 +114,15 @@ func DeviceStorage(host string) (*StorageInfo, error) {
 // DeviceStatus 读取板端电量、充电状态和温湿度，由 Android 在后台调用。
 func DeviceStatus(host string) (string, error) {
 	return ota.DeviceStatus(context.Background(), host, devicePort)
+}
+
+// DeviceID 读取相框的固定身份。旧固件返回空串。
+func DeviceID(host string) (string, error) {
+	id, err := ota.DeviceID(context.Background(), host, devicePort)
+	return string(id), err
+}
+
+// IdentityFromBluetooth 由蓝牙公开地址推出相框身份。推不出时返回空串。
+func IdentityFromBluetooth(address string) string {
+	return string(identity.FromBluetooth(address))
 }

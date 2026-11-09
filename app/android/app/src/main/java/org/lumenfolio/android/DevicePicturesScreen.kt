@@ -92,8 +92,11 @@ private sealed interface PictureRead<out T> {
 internal fun DevicePicturesScreen(
     address: String,
     bluetooth: FrameBluetoothSelection?,
+    identity: String,
+    identityNotice: String?,
     onAddressChange: (String) -> Unit,
     onConnected: (String) -> Unit,
+    onIdentity: (String, String) -> Unit,
     onBluetooth: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -141,6 +144,7 @@ internal fun DevicePicturesScreen(
     val storage = if (host.isNotEmpty()) {
         readPicture(infoRequest) {
             val capacity = Mobilepanel.deviceStorage(infoRequest.first)
+            if (bluetooth == null) onIdentity(infoRequest.first, identity)
             capacity.flash() to capacity.sd()
         }
     } else {
@@ -211,9 +215,13 @@ internal fun DevicePicturesScreen(
                             is PictureRead.Failure -> "相框状态不可用"
                         },
                     )
+                    identityNotice?.let {
+                        Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                    }
                     FrameConnectionField(
                         address = address,
                         bluetooth = bluetooth,
+                        identity = identity,
                         onAddressChange = { value ->
                             onAddressChange(value)
                             host = ""

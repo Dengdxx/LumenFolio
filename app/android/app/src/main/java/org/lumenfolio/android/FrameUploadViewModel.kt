@@ -75,6 +75,10 @@ internal class FrameUploadViewModel(application: Application) : AndroidViewModel
         private set
     var address by mutableStateOf(preferences.getString("frame_address", "").orEmpty())
         private set
+    var frameIdentity by mutableStateOf(preferences.getString("frame_identity", "").orEmpty())
+        private set
+    var identityNotice by mutableStateOf<String?>(null)
+        private set
     var bluetooth by mutableStateOf<FrameBluetoothSelection?>(null)
         private set
     val host: String get() = bluetooth?.host ?: address.trim()
@@ -210,6 +214,7 @@ internal class FrameUploadViewModel(application: Application) : AndroidViewModel
                     )
                     registeredHost = target
                     Mobilepanel.deviceStatus(target)
+                    confirmFrameIdentity(Mobilepanel.deviceID(target), Mobilepanel.identityFromBluetooth(frame.address))
                     FrameBluetoothSelection(target, frame.name, frame.address)
                 }
                 resetUploadDestination()
@@ -252,13 +257,19 @@ internal class FrameUploadViewModel(application: Application) : AndroidViewModel
         delay(350)
         if (manualDestination) return
         val sdAvailable = try {
-            withContext(Dispatchers.IO) { Mobilepanel.deviceStorage(host).sdAvailable() }
+            withContext(Dispatchers.IO) {
+                val available = Mobilepanel.deviceStorage(host).sdAvailable()
+                confirmFrameIdentity(Mobilepanel.deviceID(host), frameIdentity)
+                available
+            }
         } catch (error: CancellationException) {
             throw error
-        } catch (_: Exception) {
+        } catch (error: Exception) {
+            identityNotice = error.localizedMessage ?: "没能确认相框身份"
             false
         }
         currentCoroutineContext().ensureActive()
+        if (host == this.host) identityNotice = null
         if (host == this.host && !manualDestination) {
             uploadDestination = if (sdAvailable) FrameDestination.SD else FrameDestination.FLASH
         }
@@ -267,6 +278,30 @@ internal class FrameUploadViewModel(application: Application) : AndroidViewModel
     /** 传图、浏览和固件升级共用上次成功的 Wi-Fi 地址，蓝牙选择只在本次运行有效。 */
     fun rememberAddress(host: String) {
         if (host == address.trim()) preferences.edit().putString("frame_address", host).apply()
+    }
+
+    /**
+     * 两侧身份都有且不同时拒绝连接。旧固件不报 id，或蓝牙地址推不出基 MAC 时放行。
+     * 确认成功后记住这台相框；Wi-Fi 地址只在这次走的是手填地址时更新。
+     */
+    /** 图库刷新时核对 Wi-Fi 相框。核对失败只留下提示，不打断已经读到的列表。 */
+    fun confirmWiFiIdentity(host: String, known: String) {
+        val notice = try {
+            confirmFrameIdentity(Mobilepanel.deviceID(host), known)
+            null
+        } catch (error: Exception) {
+            error.localizedMessage ?: "没能确认相框身份"
+        }
+        viewModelScope.launch { identityNotice = notice }
+    }
+
+    private fun confirmFrameIdentity(reported: String, known: String) {
+        if (reported.isNotEmpty() && known.isNotEmpty() && reported != known) {
+            throw IOException("连上的是另一台相框（$reported），已记住的是 $known")
+        }
+        if (reported.isEmpty()) return
+        frameIdentity = reported
+        preferences.edit().putString("frame_identity", reported).apply()
     }
 
     fun sendPicture() {

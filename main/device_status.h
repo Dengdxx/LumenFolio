@@ -14,6 +14,13 @@
  * 这里只存缓存，不做任何采样：HTTP 任务里开合分压支路或阻塞等 I2C 都不合适。
  */
 
+/**
+ * @brief 读出芯片基 MAC，作为相框的固定身份。
+ *
+ * @note 启动时调一次。读失败时状态 JSON 不带 id，不阻断其余功能。
+ */
+void deviceStatusInit();
+
 /** @brief 记录最近一次电池采样。 */
 void deviceStatusSetPower(const board_power_sample_t &sample);
 
@@ -47,5 +54,6 @@ bool deviceStatusEnv(shtc3_sample_t *out);
  *
  * @note 片段不含外层花括号、不含前导逗号，可直接拼进已有 JSON 对象。
  * @note 没采过的部分整段省略，避免把 0 当成真实读数。
+ * @note id 是基 MAC，形如 "id":"7c:df:a1:e2:3f:28"。读不到时整段省略。
  */
 int deviceStatusJson(char *buf, size_t size);

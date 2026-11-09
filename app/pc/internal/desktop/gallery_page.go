@@ -14,6 +14,7 @@ import (
 	"gioui.org/widget/material"
 
 	"lumenfolio/gallery"
+	"lumenfolio/identity"
 	"lumenfolio/ota"
 )
 
@@ -78,6 +79,7 @@ type galleryResult struct {
 	err      error
 	storage  gallery.StorageUsage
 	status   string
+	frameID  identity.ID
 }
 
 func (u *ui) openGallery() {
@@ -257,9 +259,14 @@ func (u *ui) loadGalleryInfo() {
 	g.infoRequest, g.cancelInfo = ctx, cancel
 	host := g.host
 	u.runGalleryRequest(ctx, func(ctx context.Context) galleryResult {
-		usage, _ := gallery.Storage(ctx, host, 8080)
+		usage, storageErr := gallery.Storage(ctx, host, 8080)
 		status, _ := ota.DeviceStatus(ctx, host, 8080)
-		return galleryResult{storage: usage, status: status}
+		var id identity.ID
+		var identityErr error
+		if storageErr == nil {
+			id, identityErr = u.identifyWiFi(ctx, host)
+		}
+		return galleryResult{storage: usage, status: status, frameID: id, err: identityErr}
 	})
 }
 
@@ -304,7 +311,15 @@ func (g *galleryBrowser) cancelInfoRequest() {
 func (g *galleryBrowser) applyResult(result galleryResult) bool {
 	if g.infoRequest != nil && g.infoRequest == result.request {
 		g.cancelInfoRequest()
-		g.storage, g.deviceStatus = result.storage, result.status
+		g.storage = result.storage
+		switch {
+		case result.err != nil:
+			g.deviceStatus = result.err.Error()
+		case result.frameID != "":
+			g.deviceStatus = string(result.frameID) + " · " + result.status
+		default:
+			g.deviceStatus = result.status
+		}
 		return false
 	}
 	if g.request != result.request {

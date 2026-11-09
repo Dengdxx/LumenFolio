@@ -13,6 +13,7 @@ import (
 	"gioui.org/widget/material"
 
 	"lumenfolio/devicehttp"
+	"lumenfolio/identity"
 	"lumenfolio/internal/blewindows"
 	"lumenfolio/ota"
 )
@@ -21,6 +22,7 @@ import (
 type bluetoothPage struct {
 	open        bool
 	host        string
+	id          identity.ID
 	selected    blewindows.Device
 	pendingHost string
 	ctx         context.Context
@@ -37,6 +39,7 @@ type bluetoothPage struct {
 type bluetoothResult struct {
 	devices []blewindows.Device
 	device  blewindows.Device
+	id      identity.ID
 	err     error
 }
 
@@ -51,7 +54,11 @@ func (u *ui) deviceHost() string {
 
 func (u *ui) deviceLabel(host string) string {
 	if host != "" && host == u.bluetooth.host {
-		return u.bluetooth.selected.Name + " · 蓝牙"
+		label := u.bluetooth.selected.Name + " · 蓝牙"
+		if u.bluetooth.id != "" {
+			label += " · " + string(u.bluetooth.id)
+		}
+		return label
 	}
 	return host
 }
@@ -97,7 +104,14 @@ func (u *ui) connectBluetooth(device blewindows.Device) {
 	p.status = "正在连接 " + device.Name + "，若系统提示配对，请确认。"
 	go func() {
 		_, err := ota.DeviceStatus(ctx, host, 8080)
-		u.postBluetooth(bluetoothResult{device: device, err: err})
+		var id identity.ID
+		if err == nil {
+			id, err = ota.DeviceID(ctx, host, 8080)
+		}
+		if err == nil {
+			err = u.checkFrameIdentity(id, identity.FromBluetooth(device.Address))
+		}
+		u.postBluetooth(bluetoothResult{device: device, id: id, err: err})
 	}()
 }
 
@@ -129,8 +143,11 @@ func (p *bluetoothPage) apply(result bluetoothResult) {
 	}
 	if pendingHost != "" {
 		devicehttp.ForgetBluetooth(p.host)
-		p.host, p.selected = pendingHost, result.device
+		p.host, p.selected, p.id = pendingHost, result.device, result.id
 		p.status = "已连接 " + p.selected.Name
+		if p.id != "" {
+			p.status += " · " + string(p.id)
+		}
 		return
 	}
 	p.devices = result.devices
@@ -143,7 +160,7 @@ func (p *bluetoothPage) apply(result bluetoothResult) {
 
 func (p *bluetoothPage) disconnect() {
 	devicehttp.ForgetBluetooth(p.host)
-	p.host, p.selected = "", blewindows.Device{}
+	p.host, p.selected, p.id = "", blewindows.Device{}, ""
 	p.status = "已断开蓝牙，返回取景后可使用 Wi-Fi 地址。"
 }
 

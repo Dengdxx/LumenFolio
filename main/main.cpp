@@ -754,7 +754,8 @@ extern "C" void app_main(void)
     // 必须先于 nvs_flash_init()：待确认镜像遇到 NVS 错误时不能擦除，
     // 否则回滚回去的旧镜像会丢数据。
     ESP_ERROR_CHECK(otaServiceInit());
-    // 让 /ota/status 顺带带回电池与温湿度，没有 USB 时也能从局域网看运行状态。
+    // 身份在任何网络初始化之前定下来；状态里再带上电池与温湿度。
+    deviceStatusInit();
     otaServiceSetStatusExtra(deviceStatusJson);
     esp_err_t ret = nvs_flash_init();
     if ((ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) &&

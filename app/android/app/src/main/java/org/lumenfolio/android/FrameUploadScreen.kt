@@ -111,8 +111,11 @@ internal fun FrameUploadScreen(model: FrameUploadViewModel) {
             FramePage.PICTURES -> DevicePicturesScreen(
                 address = model.address,
                 bluetooth = model.bluetooth,
+                identity = model.frameIdentity,
+                identityNotice = model.identityNotice,
                 onAddressChange = model::editAddress,
                 onConnected = model::rememberAddress,
+                onIdentity = model::confirmWiFiIdentity,
                 onBluetooth = openBluetooth,
                 modifier = contentModifier,
             )
@@ -337,10 +340,14 @@ private fun FrameUploadPanel(
         FrameConnectionField(
             address = model.address,
             bluetooth = model.bluetooth,
+            identity = model.frameIdentity,
             onAddressChange = model::editAddress,
             onBluetooth = onBluetooth,
             enabled = !model.busy,
         )
+        model.identityNotice?.let {
+            Text(it, color = colors.error, style = MaterialTheme.typography.bodySmall)
+        }
         Text("存储位置", style = MaterialTheme.typography.labelLarge)
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             for (destination in FrameDestination.entries) {
@@ -419,6 +426,7 @@ private fun FrameUploadPanel(
 internal fun FrameConnectionField(
     address: String,
     bluetooth: FrameBluetoothSelection?,
+    identity: String = "",
     onAddressChange: (String) -> Unit,
     onBluetooth: () -> Unit,
     enabled: Boolean = true,
@@ -426,7 +434,11 @@ internal fun FrameConnectionField(
     if (bluetooth == null) {
         FrameAddressField(address, onAddressChange, enabled)
     } else {
-        Text("蓝牙 · ${bluetooth.name}", style = MaterialTheme.typography.bodyMedium)
+        val label = buildString {
+            append("蓝牙 · ${bluetooth.name}")
+            if (identity.isNotEmpty()) append(" · $identity")
+        }
+        Text(label, style = MaterialTheme.typography.bodyMedium)
     }
     OutlinedButton(onClick = onBluetooth, enabled = enabled, modifier = Modifier.fillMaxWidth()) {
         Text(if (bluetooth == null) "蓝牙连接" else "管理蓝牙连接")
