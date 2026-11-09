@@ -2,7 +2,6 @@ package desktop
 
 import (
 	"bytes"
-	"context"
 	"fmt"
 	"image"
 	_ "image/jpeg"
@@ -125,32 +124,6 @@ func (u *ui) postJob(text string) {
 	if u.window != nil {
 		u.window.Invalidate()
 	}
-}
-
-func (u *ui) onUpload() {
-	if u.rawImage == nil {
-		u.status = "先打开一张图片"
-		return
-	}
-	host := u.hostEditor.Text()
-	if host == "" {
-		u.status = "先填写相框地址"
-		return
-	}
-	if u.fileBusy {
-		return
-	}
-	u.fileBusy = true
-	u.status = "正在把当前构图发到 " + host
-	alg, crop, src := u.alg, u.crop, u.rawImage
-	go func() {
-		reply, err := picture.Send(context.Background(), host, 8080, alg, src, crop)
-		if err != nil {
-			u.postJob("没发出去：" + err.Error())
-			return
-		}
-		u.postJob(reply)
-	}()
 }
 
 func (u *ui) onExport() {

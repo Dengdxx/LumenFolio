@@ -115,6 +115,12 @@ void writeEpdData(uint8_t *data, unsigned int length);
 uint8_t epdDisplay(void);
 
 /**
+ * @brief 执行整帧刷新，DRF 经 SPI 送出后、等待 BUSY 前通知调用方。
+ * @note 回调在显示任务内同步执行，须立即返回；PON 或 DRF 发送失败时不调用。
+ */
+uint8_t epdDisplayWithCallback(void (*refresh_started)(void *), void *context);
+
+/**
  * @brief 两颗 IC 填同一颜色后刷新。
  * @note 不依赖 PSRAM。epdDisplay() 的返回值被忽略，失败只能看日志。
  */

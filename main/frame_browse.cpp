@@ -2,6 +2,7 @@
 
 #include <cinttypes>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 
 #include "artifacts.h"
@@ -158,19 +159,221 @@ bool parse_page(const char *query, page_query &page)
            (after_status == ESP_ERR_NOT_FOUND || page.after[0] == '\0' || decode_id(page.after));
 }
 
+frame_source query_source(const char *query)
+{
+    char source[16];
+    if (httpd_query_key_value(query, "source", source, sizeof(source)) != ESP_OK) return frame_source::invalid;
+    if (strcmp(source, "artifacts") == 0) return frame_source::artifacts;
+    if (strcmp(source, "sd") == 0) return frame_source::sd;
+    return frame_source::invalid;
+}
+
+bool query_frame_id(const char *query, encoded_id &id)
+{
+    return httpd_query_key_value(query, "id", id, sizeof(id)) == ESP_OK && decode_id(id);
+}
+
 frame_source parse_query(httpd_req_t *request, encoded_id *id = nullptr, page_query *page = nullptr)
 {
     char query[sizeof(encoded_id) + 40];
-    char source[16];
     if (httpd_req_get_url_query_str(request, query, sizeof(query)) != ESP_OK ||
-        httpd_query_key_value(query, "source", source, sizeof(source)) != ESP_OK ||
-        (id != nullptr &&
-         (httpd_query_key_value(query, "id", *id, sizeof(*id)) != ESP_OK || !decode_id(*id)))) {
+        (id != nullptr && !query_frame_id(query, *id))) {
         return frame_source::invalid;
     }
-    if (strcmp(source, "artifacts") == 0) return frame_source::artifacts;
-    if (strcmp(source, "sd") == 0 && (page == nullptr || parse_page(query, *page))) return frame_source::sd;
-    return frame_source::invalid;
+    const auto source = query_source(query);
+    if (source == frame_source::sd && page != nullptr && !parse_page(query, *page)) return frame_source::invalid;
+    return source;
+}
+
+esp_err_t send_text(httpd_req_t *request, const char *status, const char *message)
+{
+    httpd_resp_set_status(request, status);
+    httpd_resp_set_type(request, "text/plain; charset=utf-8");
+    return httpd_resp_sendstr(request, message);
+}
+
+/** @brief 接收定长帧的一个片段，超时或断开时放弃这次上传。 */
+bool receive_exact(httpd_req_t *request, uint8_t *data, size_t size)
+{
+    while (size != 0) {
+        const int received = httpd_req_recv(request, reinterpret_cast<char *>(data), size);
+        if (received <= 0) return false;
+        data += received;
+        size -= static_cast<size_t>(received);
+    }
+    return true;
+}
+
+/** @brief 复用 Flash 上传槽，最后写魔数，断线时清理已擦写的槽。 */
+esp_err_t save_inbox_upload(httpd_req_t *request, const uint8_t *header, size_t size)
+{
+    esp_err_t err = artifacts_inbox_begin();
+    constexpr size_t kHeaderBytes = EPD_FRAME_ZLIB_HEADER_BYTES;
+    for (size_t offset = kHeaderBytes; err == ESP_OK && offset < size;) {
+        const size_t bytes = size - offset < sizeof(s_chunk) ? size - offset : sizeof(s_chunk);
+        if (!receive_exact(request, s_chunk, bytes)) {
+            err = ESP_ERR_INVALID_RESPONSE;
+            break;
+        }
+        err = artifacts_inbox_write(offset, s_chunk, bytes);
+        offset += bytes;
+    }
+    if (err == ESP_OK) err = artifacts_inbox_write(4, header + 4, kHeaderBytes - 4);
+    if (err == ESP_OK) err = artifacts_inbox_write(0, header, 4);
+    if (err != ESP_OK) artifacts_inbox_discard();
+    return err;
+}
+
+esp_err_t read_uploaded_frame(void *context, size_t offset, uint8_t *data, size_t size)
+{
+    memcpy(data, static_cast<const uint8_t *>(context) + offset, size);
+    return ESP_OK;
+}
+
+/** @brief 校验整帧、压缩校验和及六色色码后才提交到 SD，验证缓冲与显示任务隔离。 */
+esp_err_t save_sd_upload(httpd_req_t *request, const char *name, const uint8_t *header,
+                         const epd_frame_info_t &info)
+{
+    constexpr size_t kHeaderBytes = EPD_FRAME_ZLIB_HEADER_BYTES;
+    const size_t scratch = info.compressed ? 2 * EPD_FRAME_PIXEL_BYTES : 0;
+    auto *frame = static_cast<uint8_t *>(heap_caps_malloc(info.frame_bytes + scratch,
+                                                        MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+    if (frame == nullptr) return ESP_ERR_NO_MEM;
+    memcpy(frame, header, kHeaderBytes);
+    esp_err_t err = ESP_ERR_INVALID_RESPONSE;
+    if (receive_exact(request, frame + kHeaderBytes, info.frame_bytes - kHeaderBytes)) {
+        uint8_t *pixels = frame + info.header_bytes;
+        err = ESP_OK;
+        if (info.compressed) {
+            pixels = frame + info.frame_bytes;
+            err = epd_frame_decode(read_uploaded_frame, frame, info.frame_bytes, pixels,
+                                   pixels + EPD_FRAME_PIXEL_BYTES);
+        }
+        if (err == ESP_OK) {
+            constexpr unsigned ink = 0x6f;  // 0, 1, 2, 3, 5, 6
+            for (size_t i = 0; i < EPD_FRAME_PIXEL_BYTES; ++i) {
+                if (!(ink & (1u << (pixels[i] >> 4))) || !(ink & (1u << (pixels[i] & 15)))) {
+                    err = ESP_ERR_INVALID_RESPONSE;
+                    break;
+                }
+            }
+        }
+        if (err == ESP_OK) {
+            err = board_sd_save_frame(name, frame, info.frame_bytes);
+            if (err == ESP_ERR_NO_MEM) err = ESP_ERR_INVALID_SIZE;  // 卡容量，不是 PSRAM。
+        }
+    }
+    free(frame);
+    return err;
+}
+
+/** @brief 接收并保存 EPD1／EPD2；旧路由保留 Flash 写入及文本响应。 */
+esp_err_t upload_frame(httpd_req_t *request, const char *sd_name, bool tracked)
+{
+    if (httpd_req_get_hdr_value_len(request, "Transfer-Encoding") || !request->content_len) {
+        return send_text(request, "411 Length Required", "需要固定的 Content-Length，不接受分块传输\n");
+    }
+    if (request->content_len < EPD_FRAME_ZLIB_HEADER_BYTES ||
+        request->content_len > EPD_FRAME_MAX_BYTES) {
+        return send_text(request, "413 Content Too Large", "帧长度必须在 16 到 960012 字节之间\n");
+    }
+    char type[48] = {};
+    if (httpd_req_get_hdr_value_str(request, "Content-Type", type, sizeof(type)) != ESP_OK ||
+        strcmp(type, "application/octet-stream") != 0) {
+        return send_text(request, "415 Unsupported Media Type", "需要 application/octet-stream\n");
+    }
+    if (sd_name == nullptr && app_storage_transfer_pending(true)) {
+        return send_text(request, "409 Conflict", "上一张上传画面仍在等待送屏\n");
+    }
+    if (sd_name != nullptr && !board_sd_mounted()) {
+        return send_text(request, "503 Service Unavailable", "SD 卡未挂载\n");
+    }
+
+    const FrameTransfer transfer;
+    uint8_t header[EPD_FRAME_ZLIB_HEADER_BYTES];
+    epd_frame_info_t info = {};
+    if (!receive_exact(request, header, sizeof(header))) {
+        return httpd_resp_send_err(request, HTTPD_400_BAD_REQUEST, "没有收到完整帧头");
+    }
+    if (epd_frame_parse_header(header, sizeof(header), &info) != ESP_OK ||
+        info.frame_bytes != request->content_len) {
+        return send_text(request, "422 Unprocessable Content", "帧头或帧长度无效\n");
+    }
+    const esp_err_t err = sd_name == nullptr ? save_inbox_upload(request, header, info.frame_bytes)
+                                            : save_sd_upload(request, sd_name, header, info);
+    switch (err) {
+    case ESP_OK: break;
+    case ESP_ERR_INVALID_ARG:
+        return httpd_resp_send_err(request, HTTPD_400_BAD_REQUEST, "帧文件名非法");
+    case ESP_ERR_NOT_ALLOWED:
+        return send_text(request, "409 Conflict", "SD 卡已有同名文件或目录\n");
+    case ESP_ERR_INVALID_CRC:
+    case ESP_ERR_INVALID_RESPONSE:
+        return send_text(request, "422 Unprocessable Content", "帧未收完整或校验失败\n");
+    case ESP_ERR_NO_MEM:
+        return send_text(request, "503 Service Unavailable", "相框暂时没有足够的解码内存\n");
+    case ESP_ERR_INVALID_STATE:
+        return send_text(request, "503 Service Unavailable", "SD 卡未挂载\n");
+    case ESP_ERR_INVALID_SIZE:
+        if (sd_name != nullptr) return send_text(request, "507 Insufficient Storage", "SD 卡空间不足\n");
+        [[fallthrough]];
+    default:
+        return httpd_resp_send_err(request, HTTPD_500_INTERNAL_SERVER_ERROR, "画面没有写入");
+    }
+
+    if (!tracked) {
+        const bool queued = app_post_display(display_cmd::inbox) == ESP_OK;
+        return send_text(request, "202 Accepted", queued ? "已写入，正在刷上屏\n" : "已写入，屏幕还没排上刷新\n");
+    }
+    const uint32_t id = app_post_transfer_display(sd_name == nullptr ? display_cmd::pick_inbox : display_cmd::pick_sd,
+                                                  sd_name);
+    char body[32];
+    snprintf(body, sizeof(body), "{\"id\":%" PRIu32 "}", id);
+    httpd_resp_set_status(request, "202 Accepted");
+    httpd_resp_set_type(request, "application/json");
+    return httpd_resp_sendstr(request, body);
+}
+
+esp_err_t handle_frame_upload(httpd_req_t *request)
+{
+    return upload_frame(request, nullptr, false);
+}
+
+/** @brief POST /frame/transfer 独立于旧路由，旧固件不会把指定 SD 的图误写 Flash。 */
+esp_err_t handle_transfer_upload(httpd_req_t *request)
+{
+    char query[sizeof(encoded_id) + 40];
+    if (httpd_req_get_url_query_str(request, query, sizeof(query)) == ESP_OK) {
+        const auto source = query_source(query);
+        if (source == frame_source::artifacts) return upload_frame(request, nullptr, true);
+        encoded_id id;
+        if (source == frame_source::sd && query_frame_id(query, id)) return upload_frame(request, id, true);
+    }
+    return httpd_resp_send_err(request, HTTPD_400_BAD_REQUEST, "需要有效的 source，上传到 SD 须提供 id");
+}
+
+/** @brief GET /frame/transfer 只读取该次上传的状态快照。 */
+esp_err_t handle_transfer_status(httpd_req_t *request)
+{
+    char query[32], id[11];
+    if (httpd_req_get_url_query_str(request, query, sizeof(query)) != ESP_OK ||
+        httpd_query_key_value(query, "id", id, sizeof(id)) != ESP_OK ||
+        id[0] == '\0' || strspn(id, "0123456789") != strlen(id)) {
+        return httpd_resp_send_err(request, HTTPD_400_BAD_REQUEST, "需要正整数 id");
+    }
+    const auto number = strtoull(id, nullptr, 10);
+    if (number == 0 || number > UINT32_MAX) {
+        return httpd_resp_send_err(request, HTTPD_400_BAD_REQUEST, "id 超出范围");
+    }
+    const char *stage, *message;
+    if (!app_display_transfer_status(static_cast<uint32_t>(number), stage, message)) {
+        return httpd_resp_send_err(request, HTTPD_404_NOT_FOUND, "传输记录不存在");
+    }
+    char body[160];
+    snprintf(body, sizeof(body), "{\"stage\":\"%s\",\"message\":\"%s\"}", stage, message);
+    httpd_resp_set_hdr(request, "Cache-Control", "no-store");
+    httpd_resp_set_type(request, "application/json");
+    return httpd_resp_sendstr(request, body);
 }
 
 /** @brief 转义 JSON 字符串内容，调用方为每个输入字节预留最多 6 字节。 */
@@ -503,6 +706,10 @@ esp_err_t handle_frame_delete(httpd_req_t *request)
     const FrameTransfer transfer;
     esp_err_t err;
     if (source == frame_source::sd) {
+        // 防止同名文件删除后重新上传，导致队列中的旧 ID 读到另一帧。
+        if (app_storage_transfer_pending(false)) {
+            return send_text(request, "409 Conflict", "SD 卡有上传画面正在等待送屏\n");
+        }
         err = board_sd_delete_frame(id);
     } else {
         const auto *slot = find_slot(id);
@@ -511,6 +718,9 @@ esp_err_t handle_frame_delete(httpd_req_t *request)
         }
         if (!slot->inbox) {
             return httpd_resp_send_err(request, HTTPD_403_FORBIDDEN, "开机画面受保护");
+        }
+        if (app_storage_transfer_pending(true)) {
+            return send_text(request, "409 Conflict", "上一张上传画面仍在等待送屏\n");
         }
         size_t size;
         // HTTP 服务串行处理上传和删除，擦除与后台解码由 artifacts 锁互斥。
@@ -545,7 +755,10 @@ esp_err_t app_register_frame_browse()
         {.uri = "/frames", .method = HTTP_GET, .handler = handle_frame_list, .user_ctx = nullptr},
         {.uri = "/frames/storage", .method = HTTP_GET, .handler = handle_frame_storage, .user_ctx = nullptr},
         {.uri = "/frame", .method = HTTP_GET, .handler = handle_frame_download, .user_ctx = nullptr},
+        {.uri = "/frame", .method = HTTP_POST, .handler = handle_frame_upload, .user_ctx = nullptr},
         {.uri = "/frame", .method = HTTP_DELETE, .handler = handle_frame_delete, .user_ctx = nullptr},
+        {.uri = "/frame/transfer", .method = HTTP_POST, .handler = handle_transfer_upload, .user_ctx = nullptr},
+        {.uri = "/frame/transfer", .method = HTTP_GET, .handler = handle_transfer_status, .user_ctx = nullptr},
         {.uri = "/frame/thumb", .method = HTTP_GET, .handler = handle_frame_thumbnail, .user_ctx = nullptr},
         {.uri = "/frame/display", .method = HTTP_POST, .handler = handle_frame_display, .user_ctx = nullptr},
     };

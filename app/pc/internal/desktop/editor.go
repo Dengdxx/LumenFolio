@@ -56,7 +56,7 @@ func (u *ui) sidebar(gtx layout.Context) layout.Dimensions {
 			layout.Rigid(gap(8)),
 			layout.Rigid(u.button("固件升级", &u.ota.openButton, u.openOTA)),
 			layout.Rigid(gap(8)),
-			layout.Rigid(u.primaryButton("上传到相框", &u.uploadButton, u.onUpload)),
+			layout.Rigid(u.uploadLayout),
 			layout.Rigid(gap(8)),
 			layout.Rigid(u.button("导出帧文件", &u.exportButton, u.onExport)),
 		)

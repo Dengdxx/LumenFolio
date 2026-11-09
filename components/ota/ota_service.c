@@ -232,8 +232,8 @@ esp_err_t otaServiceStart(void)
     config.task_priority = 2;
     config.stack_size = 6144;
     config.max_open_sockets = 3;
-    // OTA 自己用掉 3 条路由，再留 8 条给设备控制类接口（屏幕刷新、翻页、深睡等）。
-    config.max_uri_handlers = 11;
+    // OTA 自己用掉 3 条路由，再留 10 条给设备控制类接口（屏幕刷新、翻页、深睡等）。
+    config.max_uri_handlers = 13;
     /* 空闲连接可由新连接回收，避免地面站断线后端口被长期占用。 */
     config.lru_purge_enable = true;
     esp_err_t error = httpd_start(&server, &config);

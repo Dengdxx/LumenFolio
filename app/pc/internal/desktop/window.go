@@ -71,7 +71,6 @@ type ui struct {
 
 	// 按钮
 	openButton   widget.Clickable
-	uploadButton widget.Clickable
 	exportButton widget.Clickable
 	hostEditor   widget.Editor
 	modeCropBtn  widget.Clickable
@@ -94,6 +93,7 @@ type ui struct {
 	status    string
 	rendering bool // 当前构图和算法的六色预览正在计算
 	fileBusy  bool // 文件操作与升级互斥，由 UI 事件循环维护
+	upload    uploadPanel
 	gallery   galleryBrowser
 	ota       otaPage
 
@@ -137,8 +137,12 @@ func newUI(shaper *text.Shaper, initialFile string) *ui {
 		done:        make(chan ditherResult, 1),
 		ditherReq:   make(chan struct{}, 1),
 		jobResult:   make(chan string, 1),
-		gallery:     galleryBrowser{results: make(chan galleryResult, 1)},
-		ota:         otaPage{updates: make(chan otaUpdate, 1)},
+		upload: uploadPanel{
+			storageResults: make(chan uploadStorageResult, 1),
+			updates:        make(chan uploadUpdate, 1),
+		},
+		gallery: galleryBrowser{results: make(chan galleryResult, 1)},
+		ota:     otaPage{updates: make(chan otaUpdate, 1)},
 	}
 	ui.hostEditor.SingleLine = true
 	return ui
@@ -146,6 +150,7 @@ func newUI(shaper *text.Shaper, initialFile string) *ui {
 
 func (u *ui) run(w *app.Window) error {
 	defer u.closeGallery()
+	defer u.upload.close()
 	u.window = w
 	u.explorer = explorer.NewExplorer(w)
 	if u.initialFile != "" {
@@ -217,6 +222,17 @@ func (u *ui) applyPendingResults() (changed bool) {
 		case text := <-u.jobResult:
 			u.fileBusy = false
 			u.status = text
+			changed = true
+		case result := <-u.upload.storageResults:
+			changed = u.upload.applyStorage(result) || changed
+		case update := <-u.upload.updates:
+			u.upload.progress = update.progress
+			if update.finished {
+				u.upload.cancelSend()
+				u.upload.cancelSend = nil
+				u.fileBusy = false
+				u.status = update.progress.Message
+			}
 			changed = true
 		case result := <-u.gallery.results:
 			if u.gallery.applyResult(result) {

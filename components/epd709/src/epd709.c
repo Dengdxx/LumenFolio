@@ -110,15 +110,19 @@ void epdHardwareReset(void)
     delayms(50);
 }
 
-void writeEpd(uint8_t epdCommand, uint8_t *epdData, unsigned int epdDataLength)
+static uint8_t transmit_epd(uint8_t command, const uint8_t *data, unsigned int size)
 {
     uint8_t *chunk = epdChunkBuffer();
-    if (chunk != NULL && epdData != NULL && epdDataLength > 0 && epdDataLength <= EPD_SPI_CHUNK_SIZE) {
-        memcpy(chunk, epdData, epdDataLength);
-        spiTransmit(epdCommand, chunk, epdDataLength);
-        return;
+    if (chunk != NULL && data != NULL && size > 0 && size <= EPD_SPI_CHUNK_SIZE) {
+        memcpy(chunk, data, size);
+        return spiTransmit(command, chunk, size);
     }
-    spiTransmit(epdCommand, epdData, epdDataLength);
+    return spiTransmit(command, (uint8_t *)data, size);
+}
+
+void writeEpd(uint8_t epdCommand, uint8_t *epdData, unsigned int epdDataLength)
+{
+    transmit_epd(epdCommand, epdData, epdDataLength);
 }
 
 void readEpd(uint8_t epdCommand, uint8_t *epdData, unsigned int epdDataLength)
@@ -264,21 +268,24 @@ uint8_t checkDriverICStatus(void)
 }
 
 // CS 必须保持到 BUSY 重新拉高。提前释放会让面板丢掉这次电源转换。
-static uint8_t send_cmd_hold_cs_wait(const char *what, uint8_t cmd, uint8_t *data, unsigned int len)
+static uint8_t send_cmd_hold_cs_wait(const char *what, uint8_t cmd, const uint8_t *data, unsigned int len)
 {
     setPinCsAll(GPIO_LOW);
-    if (data != NULL && len > 0) {
-        writeEpd(cmd, data, len);
-    } else {
-        writeEpdCommand(cmd);
+    uint8_t status = transmit_epd(cmd, data, len);
+    if (status == DONE) {
+        delayms(1);
+        status = checkBusyHigh(what, EPD_REFRESH_BUSY_TIMEOUT_MS);
     }
-    delayms(1);
-    uint8_t status = checkBusyHigh(what, EPD_REFRESH_BUSY_TIMEOUT_MS);
     setPinCsAll(GPIO_HIGH);
     return status;
 }
 
 uint8_t epdDisplay(void)
+{
+    return epdDisplayWithCallback(NULL, NULL);
+}
+
+uint8_t epdDisplayWithCallback(void (*refresh_started)(void *), void *context)
 {
     ESP_LOGI(TAG, "Write PON");
     if (send_cmd_hold_cs_wait("PON", PON, NULL, 0) != DONE) {
@@ -288,7 +295,13 @@ uint8_t epdDisplay(void)
     ESP_LOGI(TAG, "Write DRF");
     setPinCsAll(GPIO_LOW);
     delayms(30);
-    writeEpd(DRF, (uint8_t *)DRF_V, sizeof(DRF_V));
+    if (transmit_epd(DRF, DRF_V, sizeof(DRF_V)) != DONE) {
+        setPinCsAll(GPIO_HIGH);
+        return ERROR;
+    }
+    if (refresh_started != NULL) {
+        refresh_started(context);
+    }
     delayms(1);
     if (checkBusyHigh("DRF", EPD_REFRESH_BUSY_TIMEOUT_MS) != DONE) {
         setPinCsAll(GPIO_HIGH);
@@ -297,7 +310,7 @@ uint8_t epdDisplay(void)
     setPinCsAll(GPIO_HIGH);
 
     ESP_LOGI(TAG, "Write POF");
-    if (send_cmd_hold_cs_wait("POF", POF, (uint8_t *)POF_V, sizeof(POF_V)) != DONE) {
+    if (send_cmd_hold_cs_wait("POF", POF, POF_V, sizeof(POF_V)) != DONE) {
         return ERROR;
     }
     ESP_LOGI(TAG, "Display Done!!");

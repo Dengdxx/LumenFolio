@@ -139,6 +139,13 @@ esp_err_t board_sd_browse_open(const char *name, size_t &size);
  */
 esp_err_t board_sd_delete_frame(const char *name);
 
+/**
+ * @brief 保存已完整校验的编码帧，临时文件写完并关闭后才改名为根目录帧。
+ * @return ESP_ERR_INVALID_ARG 文件名非法，ESP_ERR_INVALID_STATE 卡未挂载，
+ *         ESP_ERR_NOT_ALLOWED 已有同名条目，ESP_ERR_NO_MEM 卡空间不足，ESP_FAIL 其他 I/O 错误。
+ */
+esp_err_t board_sd_save_frame(const char *name, const uint8_t *data, size_t size);
+
 /** @brief 从当前浏览文件顺序读取一块。调用方按 open 返回的总长分块读取。 */
 esp_err_t board_sd_browse_read(uint8_t *data, size_t size);
 

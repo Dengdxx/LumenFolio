@@ -38,6 +38,7 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedCard
@@ -48,6 +49,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -299,13 +301,17 @@ private fun FrameUploadPanel(model: FrameUploadViewModel, onExport: () -> Unit, 
     val colors = MaterialTheme.colorScheme
     val focusManager = LocalFocusManager.current
     val ready = model.editor != null && !model.busy
+    val host = model.address.trim()
+    val progress = model.uploadProgress
+    val reply = model.reply
+    LaunchedEffect(host) { model.detectUploadDestination(host) }
     Panel {
         Row(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text("上传与导出", Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
-            UploadStatusBadge(model.sending, model.reply?.status)
+            UploadStatusBadge(model.sending, progress?.stage, reply)
         }
         Text(
             "上传时手机和相框需在同一局域网。相框休眠时，先按机身键唤醒。",
@@ -317,16 +323,54 @@ private fun FrameUploadPanel(model: FrameUploadViewModel, onExport: () -> Unit, 
             onAddressChange = model::editAddress,
             enabled = !model.busy,
         )
+        Text("存储位置", style = MaterialTheme.typography.labelLarge)
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            for (destination in FrameDestination.entries) {
+                FilterChip(
+                    selected = model.uploadDestination == destination,
+                    onClick = { model.selectUploadDestination(destination) },
+                    enabled = !model.busy && host.isNotEmpty(),
+                    label = { Text(destination.label) },
+                )
+            }
+        }
+        if (host.isNotEmpty() && model.uploadDestination == null) {
+            Text(
+                "正在检测 SD 卡，也可以直接选择存储位置。",
+                color = colors.onSurfaceVariant,
+                style = MaterialTheme.typography.bodySmall,
+            )
+        }
         Button(
             onClick = {
                 focusManager.clearFocus()
                 model.sendPicture()
             },
-            enabled = ready && model.address.isNotBlank(),
+            enabled = ready && host.isNotEmpty() && model.uploadDestination != null,
             shape = ControlShape,
             modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
         ) {
-            Text(if (model.sending) "正在发送…" else "上传到相框")
+            Text(if (model.sending) "正在处理…" else "上传到相框")
+        }
+        if (model.sending || (reply?.error == false && progress?.stage == "done")) {
+            if (progress == null) {
+                LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+            } else {
+                LinearProgressIndicator(progress = { progress.percent / 100f }, modifier = Modifier.fillMaxWidth())
+            }
+        }
+        val feedback = model.message ?: reply?.message ?: if (model.sending) {
+            progress?.message ?: "正在生成帧…"
+        } else {
+            null
+        }
+        if (feedback != null) {
+            Text(
+                feedback,
+                modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
+                color = if (reply?.error == true) colors.error else colors.onSurfaceVariant,
+                style = MaterialTheme.typography.bodyMedium,
+            )
         }
         OutlinedButton(
             onClick = {
@@ -350,15 +394,6 @@ private fun FrameUploadPanel(model: FrameUploadViewModel, onExport: () -> Unit, 
         ) {
             Text("固件升级")
         }
-        val feedback = model.message ?: model.reply?.message
-        if (feedback != null) {
-            Text(
-                feedback,
-                modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
-                color = colors.onSurfaceVariant,
-                style = MaterialTheme.typography.bodyMedium,
-            )
-        }
     }
 }
 
@@ -370,7 +405,7 @@ internal fun FrameAddressField(address: String, onAddressChange: (String) -> Uni
         onValueChange = onAddressChange,
         label = { Text("相框 IP 或主机名") },
         placeholder = { Text("192.168.1.42") },
-        supportingText = { Text("端口 ${FrameClient.PORT}") },
+        supportingText = { Text("端口 8080") },
         enabled = enabled,
         singleLine = true,
         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri, imeAction = ImeAction.Done),
@@ -388,17 +423,24 @@ internal fun FrameAddressField(address: String, onAddressChange: (String) -> Uni
 }
 
 @Composable
-private fun UploadStatusBadge(sending: Boolean, status: FrameClient.Status?) {
+private fun UploadStatusBadge(sending: Boolean, stage: String?, reply: FrameUploadReply?) {
     val colors = MaterialTheme.colorScheme
-    val (text, tint) = if (sending) {
-        "发送中" to colors.onPrimaryContainer
-    } else {
-        when (status) {
-            FrameClient.Status.RECEIVED -> "已接收" to colors.tertiary
-            FrameClient.Status.NOT_QUEUED -> "未排队" to colors.secondary
-            FrameClient.Status.FAILED -> "发送异常" to colors.error
-            null -> "待发送" to colors.onSurfaceVariant
+    val (text, tint) = when {
+        sending -> {
+            val label = when (stage) {
+                "upload" -> "正在上传"
+                "storage" -> "正在保存"
+                "queued" -> "等待写屏"
+                "spi" -> "SPI 写屏"
+                "done" -> "SPI 已写完"
+                else -> "正在准备"
+            }
+            label to colors.onPrimaryContainer
         }
+        reply?.error == true -> "发送异常" to colors.error
+        reply != null && stage == "done" -> "SPI 已写完" to colors.tertiary
+        reply != null -> "已回执" to colors.secondary
+        else -> "待发送" to colors.onSurfaceVariant
     }
     Surface(color = tint.copy(alpha = 0.13f), contentColor = tint, shape = CircleShape) {
         Text(

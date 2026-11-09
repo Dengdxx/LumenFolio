@@ -3,6 +3,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <mutex>
 
 #include "app.h"
 #include "artifacts.h"
@@ -46,6 +47,45 @@ constexpr uint32_t kPowerPollMs = 30000;
 // 空闲多久进深睡。开发阶段放宽到 5 min：30 s 在台面上频繁打断操作。
 // 只在电池供电且没有 USB 主机时生效；插着电说明人在旁边，睡了也收不到 OTA。
 constexpr uint32_t kIdleSleepMs = 5 * 60 * 1000;
+
+constexpr size_t kDisplayQueueSize = 8;
+constexpr size_t kTransferHistory = 16;
+
+/** @brief 本次开机的上传结果。HTTP 与显示任务在锁内发布或读取，活动记录优先保留。 */
+enum class transfer_stage { queued, spi, done, failed };
+struct transfer_status {
+    uint32_t id;
+    transfer_stage stage;
+    const char *message;
+    bool inbox;
+};
+std::mutex s_transfer_mutex;
+transfer_status s_transfers[kTransferHistory];
+uint32_t s_last_transfer_id;
+
+bool transfer_active(transfer_stage stage)
+{
+    return stage == transfer_stage::queued || stage == transfer_stage::spi;
+}
+
+void update_transfer(uint32_t id, transfer_stage stage, const char *message)
+{
+    if (id == 0) return;
+    std::lock_guard lock(s_transfer_mutex);
+    for (auto &record : s_transfers) {
+        if (record.id == id && transfer_active(record.stage)) {
+            record.stage = stage;
+            record.message = message;
+            return;
+        }
+    }
+}
+
+/** @brief 驱动已发出 DRF，此时面板波形仍在运行，上传结果可先交付。 */
+void transfer_refresh_started(void *context)
+{
+    update_transfer(*static_cast<const uint32_t *>(context), transfer_stage::done, "画面已送达面板");
+}
 
 // 最近一次显示到第几张。放进 RTC 内存，深睡唤醒后接着上一张，不会跳回第一张。
 RTC_DATA_ATTR int s_frame_index;
@@ -148,10 +188,11 @@ void env_task(void *)
 }
 
 /** @brief 把 back buffer 刷上屏；刷新期间点亮刷屏灯语。 */
-bool present_back(const char *what)
+bool present_back(const char *what, uint32_t transfer_id = 0)
 {
     led_state_set(LED_STATE_EPD_BUSY, true);
-    const esp_err_t err = epd_fb_present();
+    update_transfer(transfer_id, transfer_stage::spi, "正在向面板发送画面");
+    const esp_err_t err = epd_fb_present(transfer_id != 0 ? transfer_refresh_started : nullptr, &transfer_id);
     led_state_set(LED_STATE_EPD_BUSY, false);
     if (err != ESP_OK) {
         ESP_LOGE(kTag, "刷屏失败：%s", esp_err_to_name(err));
@@ -181,6 +222,7 @@ bool show_card_frame(int index, int count)
 struct display_request {
     display_cmd cmd;
     char sd_name[BOARD_SD_FRAME_NAME_BYTES];
+    uint32_t transfer_id;
 };
 
 /** @brief 只刷指定来源，读取失败时保留屏幕现有画面。 */
@@ -190,13 +232,13 @@ esp_err_t show_picked_frame(const display_request &request)
         const bool inbox = request.cmd == display_cmd::pick_inbox;
         const esp_err_t err = inbox ? artifacts_draw_inbox_frame() : artifacts_draw_boot_frame();
         if (err != ESP_OK) return err;
-        return present_back(inbox ? "上传画面" : "开机画面") ? ESP_OK : ESP_FAIL;
+        return present_back(inbox ? "上传画面" : "开机画面", request.transfer_id) ? ESP_OK : ESP_FAIL;
     }
     char path[sizeof(BOARD_SD_MOUNT_POINT) + BOARD_SD_FRAME_NAME_BYTES];
     snprintf(path, sizeof(path), "%s/%s", BOARD_SD_MOUNT_POINT, request.sd_name);
     const esp_err_t err = board_sd_load_frame(path);
     if (err != ESP_OK) return err;
-    if (!present_back(path)) return ESP_FAIL;
+    if (!present_back(path, request.transfer_id)) return ESP_FAIL;
     const int index = board_sd_frame_index(request.sd_name);
     if (index >= 0) {
         s_frame_index = index;
@@ -365,119 +407,6 @@ void register_console_route()
 }
 
 /**
- * @brief POST /frame：按声明长度保存 EPD1／EPD2，再由显示任务解码并刷屏。
- *
- * 帧头可跨任意多次 recv，验证尺寸和 Content-Length 后才擦槽。载荷边收边写，
- * 元数据落盘后单独写魔数，避免未完成的上传被误认成有效帧。Flash 写入期间
- * 接收路径不访问 PSRAM；解压长度、完整流结束和 Adler32 由随后的显示任务验证。
- */
-esp_err_t handle_frame_upload(httpd_req_t *request)
-{
-    if (httpd_req_get_hdr_value_len(request, "Transfer-Encoding") || !request->content_len) {
-        httpd_resp_set_status(request, "411 Length Required");
-        return httpd_resp_sendstr(request, "需要固定的 Content-Length，不接受分块传输\n");
-    }
-    if (request->content_len < EPD_FRAME_ZLIB_HEADER_BYTES ||
-        request->content_len > ARTIFACTS_FRAME_BYTES) {
-        httpd_resp_set_status(request, "413 Content Too Large");
-        return httpd_resp_sendstr(request, "帧长度必须在 16 到 960012 字节之间\n");
-    }
-
-    char type[48] = {};
-    if (httpd_req_get_hdr_value_str(request, "Content-Type", type, sizeof(type)) != ESP_OK ||
-        strcmp(type, "application/octet-stream") != 0) {
-        httpd_resp_set_status(request, "415 Unsupported Media Type");
-        return httpd_resp_sendstr(request, "需要 application/octet-stream\n");
-    }
-
-    app_frame_transfer_begin();
-    esp_err_t result = ESP_OK;
-    uint8_t header[EPD_FRAME_ZLIB_HEADER_BYTES];
-    size_t got = 0;
-    while (result == ESP_OK && got < sizeof(header)) {
-        const int received = httpd_req_recv(request, reinterpret_cast<char *>(header + got),
-                                            sizeof(header) - got);
-        if (received == HTTPD_SOCK_ERR_TIMEOUT) {
-            continue;
-        }
-        if (received <= 0) {
-            result = ESP_FAIL;
-            break;
-        }
-        got += static_cast<size_t>(received);
-    }
-    epd_frame_info_t info = {};
-    if (result == ESP_OK) {
-        result = epd_frame_parse_header(header, sizeof(header), &info);
-        if (result == ESP_OK && info.frame_bytes != request->content_len) {
-            result = ESP_ERR_INVALID_SIZE;
-        }
-    }
-    bool writing = false;
-    if (result == ESP_OK) {
-        writing = true;
-        result = artifacts_inbox_begin();
-    }
-    uint8_t chunk[4096];
-    while (result == ESP_OK && got < info.frame_bytes) {
-        const size_t ask = info.frame_bytes - got < sizeof(chunk)
-                               ? info.frame_bytes - got : sizeof(chunk);
-        const int received = httpd_req_recv(request, reinterpret_cast<char *>(chunk), ask);
-        if (received == HTTPD_SOCK_ERR_TIMEOUT) {
-            continue;
-        }
-        if (received <= 0) {
-            result = ESP_FAIL;
-            break;
-        }
-        result = artifacts_inbox_write(got, chunk, static_cast<size_t>(received));
-        got += static_cast<size_t>(received);
-    }
-    if (result == ESP_OK) {
-        // EPD1 的前 16 字节还含 4 字节像素，也必须先于魔数落盘。
-        result = artifacts_inbox_write(4, header + 4, sizeof(header) - 4);
-    }
-    if (result == ESP_OK) {
-        result = artifacts_inbox_write(0, header, 4);
-    }
-    if (result != ESP_OK && writing) {
-        artifacts_inbox_discard();
-    }
-    app_frame_transfer_end();
-
-    if (result != ESP_OK) {
-        httpd_resp_set_status(request, result == ESP_ERR_NOT_FOUND || result == ESP_ERR_INVALID_SIZE
-                                           ? "422 Unprocessable Content"
-                                           : "500 Internal Server Error");
-        httpd_resp_set_type(request, "text/plain; charset=utf-8");
-        return httpd_resp_sendstr(request, "画面没有写入\n");
-    }
-    if (app_post_display(display_cmd::inbox) != ESP_OK) {
-        httpd_resp_set_status(request, "202 Accepted");
-        return httpd_resp_sendstr(request, "已写入，屏幕还没排上刷新\n");
-    }
-    httpd_resp_set_status(request, "202 Accepted");
-    return httpd_resp_sendstr(request, "已写入，正在刷上屏\n");
-}
-
-httpd_uri_t s_uri_frame;
-
-void register_frame_route()
-{
-    s_uri_frame = {};
-    s_uri_frame.uri = "/frame";
-    s_uri_frame.method = HTTP_POST;
-    s_uri_frame.handler = handle_frame_upload;
-
-    const esp_err_t err = otaServiceRegisterHandler(&s_uri_frame);
-    if (err != ESP_OK) {
-        ESP_LOGE(kTag, "传图接口注册失败：%s", esp_err_to_name(err));
-        return;
-    }
-    ESP_LOGI(kTag, "传图：POST /frame，EPD1／EPD2 无损帧");
-}
-
-/**
  * @brief 显示任务：初始化面板后等命令，不主动刷屏。
  *
  * 面板是双稳态的，上电后保持上一次的画面，所以开机不刷能省下几十秒，
@@ -554,17 +483,20 @@ void display_task(void *)
                 ++step;
             } else if (request.cmd == display_cmd::prev) {
                 --step;
-            } else if (request.cmd == display_cmd::factory) {
-                factory = true;
-                picked = {};
-            } else if (request.cmd == display_cmd::inbox) {
-                inbox = true;
-                picked = {};
             } else if (request.cmd == display_cmd::refresh) {
                 force = true;
             } else {
-                picked = request;
-                inbox = factory = false;
+                update_transfer(picked.transfer_id, transfer_stage::failed, "显示请求被后续命令替代");
+                if (request.cmd == display_cmd::factory) {
+                    factory = true;
+                    picked = {};
+                } else if (request.cmd == display_cmd::inbox) {
+                    inbox = true;
+                    picked = {};
+                } else {
+                    picked = request;
+                    inbox = factory = false;
+                }
             }
         }
 
@@ -588,8 +520,10 @@ void display_task(void *)
             } else {
                 if (err == ESP_OK) {
                     current_pick = target;
+                    current_pick.transfer_id = 0;
                     s_last_result = "ok";
                 } else {
+                    update_transfer(target.transfer_id, transfer_stage::failed, "无法读取画面或送达面板");
                     ESP_LOGW(kTag, "选中的画面载入或上屏失败");
                     s_last_result = "load-failed";
                     led_event_post(LED_EV_ANOMALY, 0);
@@ -650,12 +584,14 @@ void display_task(void *)
 
 }  // namespace
 
-esp_err_t app_post_display(display_cmd cmd, const char *sd_name)
+static esp_err_t post_display(display_cmd cmd, const char *sd_name, uint32_t transfer_id)
 {
-    if (s_cmds == nullptr || s_display_state == display_state::dead) {
+    const auto state = s_display_state.load();
+    if (s_cmds == nullptr || state == display_state::dead ||
+        (transfer_id != 0 && state == display_state::starting)) {
         return ESP_ERR_INVALID_STATE;
     }
-    display_request request = {cmd, {}};
+    display_request request = {cmd, {}, transfer_id};
     if (cmd == display_cmd::pick_sd) {
         if (sd_name == nullptr || strlen(sd_name) >= sizeof(request.sd_name)) {
             return ESP_ERR_INVALID_ARG;
@@ -663,6 +599,57 @@ esp_err_t app_post_display(display_cmd cmd, const char *sd_name)
         strcpy(request.sd_name, sd_name);
     }
     return xQueueSend(s_cmds, &request, 0) == pdTRUE ? ESP_OK : ESP_ERR_NO_MEM;
+}
+
+esp_err_t app_post_display(display_cmd cmd, const char *sd_name)
+{
+    return post_display(cmd, sd_name, 0);
+}
+
+uint32_t app_post_transfer_display(display_cmd cmd, const char *sd_name)
+{
+    uint32_t id;
+    {
+        std::lock_guard lock(s_transfer_mutex);
+        // 记录容量大于队列和显示任务当前取出的项目，至少有一条可用记录。
+        transfer_status *oldest = nullptr;
+        for (auto &record : s_transfers) {
+            if ((record.id == 0 || !transfer_active(record.stage)) &&
+                (oldest == nullptr || record.id < oldest->id)) {
+                oldest = &record;
+            }
+        }
+        id = ++s_last_transfer_id;
+        if (id == 0) id = ++s_last_transfer_id;
+        *oldest = {id, transfer_stage::queued, "已保存，等待发送到面板", cmd == display_cmd::pick_inbox};
+    }
+    if (post_display(cmd, sd_name, id) != ESP_OK) {
+        update_transfer(id, transfer_stage::failed, "显示任务不可用或队列已满");
+    }
+    return id;
+}
+
+bool app_display_transfer_status(uint32_t id, const char *&stage, const char *&message)
+{
+    constexpr const char *names[] = {"queued", "spi", "done", "failed"};
+    std::lock_guard lock(s_transfer_mutex);
+    for (const auto &record : s_transfers) {
+        if (id != 0 && record.id == id) {
+            stage = names[static_cast<size_t>(record.stage)];
+            message = record.message;
+            return true;
+        }
+    }
+    return false;
+}
+
+bool app_storage_transfer_pending(bool inbox)
+{
+    std::lock_guard lock(s_transfer_mutex);
+    for (const auto &record : s_transfers) {
+        if (record.id != 0 && record.inbox == inbox && transfer_active(record.stage)) return true;
+    }
+    return false;
 }
 
 void app_request_sleep()
@@ -796,7 +783,6 @@ extern "C" void app_main(void)
     if (wifi == ESP_OK) {
         ESP_ERROR_CHECK(otaServiceStart());
         register_console_route();
-        register_frame_route();
         const esp_err_t browse = app_register_frame_browse();
         if (browse != ESP_OK) {
             ESP_LOGE(kTag, "画面浏览接口注册失败：%s", esp_err_to_name(browse));
@@ -822,7 +808,7 @@ extern "C" void app_main(void)
              lumenfolio::board::kPowerChgStat, lumenfolio::board::kPowerFullStat);
 
     // 刷屏命令共用一条队列：按键、串口控制台、HTTP 控制台。
-    s_cmds = xQueueCreate(8, sizeof(display_request));
+    s_cmds = xQueueCreate(kDisplayQueueSize, sizeof(display_request));
     if (s_cmds == nullptr) {
         ESP_LOGE(kTag, "命令队列创建失败");
     }

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <stddef.h>
+#include <stdint.h>
 
 #include "esp_err.h"
 
@@ -25,6 +26,15 @@ enum class display_cmd { refresh, next, prev, factory, inbox, pick_boot, pick_in
  * @note 只投递不等待：一次整帧刷新要几十秒，控制台不能跟着卡住。
  */
 esp_err_t app_post_display(display_cmd cmd, const char *sd_name = nullptr);
+
+/** @brief 给已保存的上传帧分配查询 ID，并投递显示。投递失败也保留该 ID 的结果。 */
+uint32_t app_post_transfer_display(display_cmd cmd, const char *sd_name);
+
+/** @brief 按本次开机内的上传 ID 查询阶段及说明；返回的字符串为常量。 */
+bool app_display_transfer_status(uint32_t id, const char *&stage, const char *&message);
+
+/** @brief 该存储来源仍有待送屏的上传帧。HTTP 修改原件前查询以保护关联 ID。 */
+bool app_storage_transfer_pending(bool inbox);
 
 /**
  * @brief 请求立即进入深度睡眠。
@@ -64,5 +74,5 @@ void app_frame_transfer_begin(void);
  */
 void app_frame_transfer_end(void);
 
-/** @brief HTTP 服务启动后注册设备画面列表、容量、缩略图、预览和选图刷屏接口。 */
+/** @brief HTTP 服务启动后注册设备画面上传、浏览和管理接口。 */
 esp_err_t app_register_frame_browse(void);

@@ -36,7 +36,10 @@ esp_err_t send_plane(uint8_t cs, const uint8_t *plane)
     }
 
     setPinCs(cs, GPIO_LOW);
-    writeEpdCommand(DTM);
+    if (spiTransmitCommand(DTM) != DONE) {
+        setPinCs(cs, GPIO_HIGH);
+        return ESP_FAIL;
+    }
 
     esp_err_t err = ESP_OK;
     for (size_t off = 0; off < EPD_FB_PLANE_BYTES; off += kChunkBytes) {
@@ -150,7 +153,7 @@ void epd_fb_fill_rect(int x, int y, int w, int h, uint8_t color)
     }
 }
 
-esp_err_t epd_fb_present(void)
+esp_err_t epd_fb_present(void (*refresh_started)(void *), void *context)
 {
     if (!epd_fb_ready()) {
         return ESP_ERR_INVALID_STATE;
@@ -162,8 +165,8 @@ esp_err_t epd_fb_present(void)
     if (send_plane(EPD_CS_SUB, s_back + kPlaneOffset[1]) != ESP_OK) {
         return ESP_FAIL;
     }
-    if (epdDisplay() != DONE) {
-        ESP_LOGE(kTag, "epdDisplay() 失败");
+    if (epdDisplayWithCallback(refresh_started, context) != DONE) {
+        ESP_LOGE(kTag, "面板刷新失败");
         return ESP_FAIL;
     }
 

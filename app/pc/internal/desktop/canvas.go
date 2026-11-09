@@ -345,6 +345,9 @@ func (u *ui) statusBar(gtx layout.Context) layout.Dimensions {
 		func(gtx layout.Context) layout.Dimensions {
 			return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
 				layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+					if u.upload.cancelSend != nil {
+						return u.uploadProgress(gtx)
+					}
 					label := material.Body2(u.theme, u.status)
 					label.Color = u.colors.muted
 					return label.Layout(gtx)

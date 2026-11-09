@@ -39,3 +39,15 @@ func Send(ctx context.Context, host string, port, alg int, src image.Image, crop
 	}
 	return frame.Send(ctx, host, port, encoded)
 }
+
+// SendTo 编码当前构图，保存到选定存储并等待相框完成 SPI 交付。
+func SendTo(ctx context.Context, host string, port, alg int, src image.Image, crop panel.Crop, target frame.Target, name string, report func(frame.Progress)) (string, error) {
+	if host == "" {
+		return "", fmt.Errorf("缺少设备地址")
+	}
+	encoded, err := Encode(alg, src, crop)
+	if err != nil {
+		return "", err
+	}
+	return frame.SendTo(ctx, host, port, encoded, target, name, report)
+}

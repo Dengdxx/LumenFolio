@@ -137,6 +137,9 @@ func (u *ui) tabButton(label string, clickable *widget.Clickable, active bool, a
 }
 
 func (u *ui) hostField(gtx layout.Context) layout.Dimensions {
+	if u.upload.cancelSend != nil {
+		gtx = gtx.Disabled()
+	}
 	gtx.Constraints.Min.X = gtx.Constraints.Max.X
 	editor := material.Editor(u.theme, &u.hostEditor, "192.168.137.42")
 	editor.Color = u.colors.text

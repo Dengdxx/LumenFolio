@@ -74,10 +74,12 @@ void epd_fb_fill_rect(int x, int y, int w, int h, uint8_t color);
 
 /**
  * @brief 把 back 刷上屏，成功后与 front 交换。
+ * @param refresh_started 可为空；DRF 经 SPI 送出后同步调用。
+ * @param context 传给回调的上下文，只在本次调用内使用。
  * @return 未就绪为 ESP_ERR_INVALID_STATE；SPI 或面板时序失败为 ESP_FAIL。
  * @note 阻塞，DRF 最长等 60 s。失败不交换，面板上可能已是半帧。
  */
-esp_err_t epd_fb_present(void);
+esp_err_t epd_fb_present(void (*refresh_started)(void *), void *context);
 
 #ifdef __cplusplus
 }

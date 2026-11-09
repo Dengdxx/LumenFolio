@@ -463,6 +463,43 @@ esp_err_t board_sd_delete_frame(const char *name)
     return ESP_OK;
 }
 
+esp_err_t board_sd_save_frame(const char *name, const uint8_t *data, size_t size)
+{
+    if (!is_frame_name(name) || name[0] == ' ' || strpbrk(name, "*?\"<>|") != nullptr) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    for (const unsigned char *ch = reinterpret_cast<const unsigned char *>(name); *ch; ++ch) {
+        if (*ch < 32 || *ch == 127) return ESP_ERR_INVALID_ARG;
+    }
+    std::lock_guard lock(s_sd_mutex);
+    if (s_card == nullptr) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    char path[sizeof(BOARD_SD_MOUNT_POINT) + BOARD_SD_FRAME_NAME_BYTES];
+    snprintf(path, sizeof(path), "%s/%s", BOARD_SD_MOUNT_POINT, name);
+    struct stat info = {};
+    if (stat(path, &info) == 0) return ESP_ERR_NOT_ALLOWED;
+    if (errno != ENOENT) return errno == EINVAL ? ESP_ERR_INVALID_ARG : ESP_FAIL;
+
+    // 保留给上传；重启遗留的临时文件可重用，图库和翻页只识别 .bin。
+    constexpr char temp[] = BOARD_SD_MOUNT_POINT "/LumenFolio-upload.tmp";
+    FILE *file = fopen(temp, "wb");
+    if (file == nullptr) return errno == ENOSPC ? ESP_ERR_NO_MEM : ESP_FAIL;
+    esp_err_t err = ESP_OK;
+    if (fwrite(data, 1, size, file) != size) err = errno == ENOSPC ? ESP_ERR_NO_MEM : ESP_FAIL;
+    if (fclose(file) != 0 && err == ESP_OK) err = errno == ENOSPC ? ESP_ERR_NO_MEM : ESP_FAIL;
+    if (err == ESP_OK && rename(temp, path) != 0) {
+        switch (errno) {
+        case EINVAL: err = ESP_ERR_INVALID_ARG; break;
+        case EEXIST: err = ESP_ERR_NOT_ALLOWED; break;
+        case ENOSPC: err = ESP_ERR_NO_MEM; break;
+        default: err = ESP_FAIL; break;
+        }
+    }
+    if (err != ESP_OK) unlink(temp);
+    return err;
+}
+
 esp_err_t board_sd_browse_read(uint8_t *data, size_t size)
 {
     std::lock_guard lock(s_sd_mutex);

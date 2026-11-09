@@ -98,6 +98,9 @@ func (s *StorageInfo) Flash() string { return s.usage.Flash.String() }
 // SD 返回 SD 卡的容量文本。
 func (s *StorageInfo) SD() string { return s.usage.SD.String() }
 
+// SDAvailable 表示相框已挂载 SD 卡并能读取容量。
+func (s *StorageInfo) SDAvailable() bool { return s.usage.SD.TotalBytes != 0 }
+
 // DeviceStorage 读取 Flash 和 SD 卡容量，由 Android 在后台调用。
 func DeviceStorage(host string) (*StorageInfo, error) {
 	usage, err := gallery.Storage(context.Background(), host, devicePort)

@@ -13,12 +13,12 @@ import androidx.compose.runtime.setValue
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import java.io.IOException
-import java.net.URISyntaxException
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -29,6 +29,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import org.lumenfolio.mobilepanel.Crop
+import org.lumenfolio.mobilepanel.FrameTransferListener
 import org.lumenfolio.mobilepanel.Mobilepanel
 import org.lumenfolio.mobilepanel.OTAListener
 import org.lumenfolio.mobilepanel.Picture
@@ -41,7 +42,16 @@ internal data class EditorPicture(
     val width: Int,
     val height: Int,
     val crop: Crop,
+    val name: String,
 )
+
+internal enum class FrameDestination(val source: String, val label: String) {
+    SD("sd", "SD 卡"),
+    FLASH("artifacts", "Flash artifacts"),
+}
+
+internal data class FrameUploadProgress(val stage: String, val percent: Int, val message: String)
+internal data class FrameUploadReply(val message: String, val error: Boolean = false)
 
 /** 确认界面展示的版本和上传的数据来自同一份已选镜像。 */
 internal class SelectedFirmware(val name: String, val version: String, val data: ByteArray)
@@ -64,11 +74,16 @@ internal class FrameUploadViewModel(application: Application) : AndroidViewModel
         private set
     var address by mutableStateOf(preferences.getString("frame_address", "").orEmpty())
         private set
+    var uploadDestination by mutableStateOf<FrameDestination?>(null)
+        private set
+    private var manualDestination = false
     var busy by mutableStateOf(false)
         private set
     var sending by mutableStateOf(false)
         private set
-    var reply by mutableStateOf<FrameClient.Reply?>(null)
+    var uploadProgress by mutableStateOf<FrameUploadProgress?>(null)
+        private set
+    var reply by mutableStateOf<FrameUploadReply?>(null)
         private set
     var message by mutableStateOf<String?>(null)
         private set
@@ -89,9 +104,19 @@ internal class FrameUploadViewModel(application: Application) : AndroidViewModel
 
     fun openImage(uri: Uri) {
         runOperation(failure = "没打开图片") {
-            val bytes = withContext(Dispatchers.IO) {
-                contentResolver.openInputStream(uri)?.use { it.readBytes() }
+            val (bytes, name) = withContext(Dispatchers.IO) {
+                val name = try {
+                    contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)
+                        ?.use { cursor ->
+                            val index = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                            if (index >= 0 && cursor.moveToFirst()) cursor.getString(index) else null
+                        }
+                } catch (_: IllegalArgumentException) {
+                    null
+                }
+                val bytes = contentResolver.openInputStream(uri)?.use { it.readBytes() }
                     ?: throw IOException("无法读取选中的图片")
+                bytes to (name ?: "图片")
             }
             val opened = processImage {
                 val picture = Mobilepanel.openPicture(bytes)
@@ -104,7 +129,7 @@ internal class FrameUploadViewModel(application: Application) : AndroidViewModel
                 val options = BitmapFactory.Options().apply { inSampleSize = sampleSize }
                 val thumbnail = BitmapFactory.decodeByteArray(bytes, 0, bytes.size, options)
                     ?: throw IOException("无法生成图片缩略图")
-                EditorPicture(picture, thumbnail, width, height, picture.initialCrop())
+                EditorPicture(picture, thumbnail, width, height, picture.initialCrop(), name)
             }
             editor = opened
             showingPreview = false
@@ -152,8 +177,38 @@ internal class FrameUploadViewModel(application: Application) : AndroidViewModel
 
     fun editAddress(value: String) {
         if (busy) return
+        if (address.trim() != value.trim()) {
+            manualDestination = false
+            uploadDestination = null
+        }
         address = value
         reply = null
+    }
+
+    fun selectUploadDestination(destination: FrameDestination) {
+        if (busy) return
+        manualDestination = true
+        uploadDestination = destination
+        reply = null
+    }
+
+    /** 地址变化后探测 SD 卡，手动选择优先于后台回执。 */
+    suspend fun detectUploadDestination(host: String) {
+        if (host.isEmpty() || busy || manualDestination) return
+        uploadDestination = null
+        delay(350)
+        if (manualDestination) return
+        val sdAvailable = try {
+            withContext(Dispatchers.IO) { Mobilepanel.deviceStorage(host).sdAvailable() }
+        } catch (error: CancellationException) {
+            throw error
+        } catch (_: Exception) {
+            false
+        }
+        currentCoroutineContext().ensureActive()
+        if (host == address.trim() && !manualDestination) {
+            uploadDestination = if (sdAvailable) FrameDestination.SD else FrameDestination.FLASH
+        }
     }
 
     /** 传图、浏览和固件升级使用同一个最近连接成功的相框地址。 */
@@ -163,26 +218,34 @@ internal class FrameUploadViewModel(application: Application) : AndroidViewModel
 
     fun sendPicture() {
         val snapshot = editor ?: return
+        val destination = uploadDestination ?: return
         val preset = algorithm
         val host = address.trim()
         if (host.isEmpty()) return
-        runOperation(upload = true, failure = "没能发送画面") {
+        runOperation(upload = true, failure = "没能发送画面", onFailure = { reply = FrameUploadReply(it, error = true) }) {
             val rendered = render(snapshot, preset)
             val frame = processImage { rendered.frame() }
-            val response = try {
-                withContext(Dispatchers.IO) { FrameClient.send(host, frame) }
-            } catch (_: URISyntaxException) {
-                FrameClient.Reply(FrameClient.Status.FAILED, "请输入相框 IP 或主机名，例如 192.168.1.42。")
-            } catch (_: IOException) {
-                FrameClient.Reply(
-                    FrameClient.Status.FAILED,
-                    "未收到相框回执。请查看屏幕并确认相框已唤醒、地址正确，再重试。",
-                )
+            val response = coroutineScope {
+                val updates = MutableStateFlow<FrameUploadProgress?>(null)
+                val collector = launch { updates.collect { uploadProgress = it } }
+                try {
+                    withContext(Dispatchers.IO) {
+                        Mobilepanel.uploadDeviceFrame(
+                            host, frame, destination.source, snapshot.name,
+                            object : FrameTransferListener {
+                                override fun onFrameProgress(stage: String, percent: Int, message: String) {
+                                    updates.value = FrameUploadProgress(stage, percent, message)
+                                }
+                            },
+                        )
+                    }
+                } finally {
+                    collector.cancel()
+                    uploadProgress = updates.value
+                }
             }
-            if (response.status != FrameClient.Status.FAILED) {
-                rememberAddress(host)
-            }
-            reply = response
+            rememberAddress(host)
+            reply = FrameUploadReply(response)
         }
     }
 
@@ -270,6 +333,7 @@ internal class FrameUploadViewModel(application: Application) : AndroidViewModel
         stopPreview()
         busy = true
         sending = upload
+        uploadProgress = null
         reply = null
         message = null
         viewModelScope.launch {
