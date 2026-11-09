@@ -1,0 +1,35 @@
+.vscode/
+.output/
+
+# Generated dependencies and build caches
+node_modules/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# ESP-IDF
+build/
+managed_components/
+sdkconfig.old
+
+# Local operating-system files
+.DS_Store
+Thumbs.db
+
+# ESP-IDF 生成物（配置真值在 sdkconfig.defaults）
+sdkconfig
+
+# FrameFolio 的编译产物、截图和本地调试脚本
+framefolio/FrameFolio.exe
+framefolio/*.log
+framefolio/*.png
+framefolio/*.ps1
+
+# 编辑器/语言服务缓存
+.cache/
+
+# 本地烧录辅助脚本和日志，每次重新生成
+tools/_idf_cmd.bat
+tools/_run_idf.py
+tools/idf.log
+tools/*.log

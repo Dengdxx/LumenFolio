@@ -1,0 +1,9 @@
+idf_component_register(
+    SRCS
+        "src/epd_fb.cpp"
+    INCLUDE_DIRS
+        "include"
+    REQUIRES
+        epd709
+        heap
+)

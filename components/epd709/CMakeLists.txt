@@ -1,0 +1,12 @@
+idf_component_register(
+    SRCS
+        "src/epd709.c"
+        "src/epd709_comm.c"
+    INCLUDE_DIRS
+        "include"
+    REQUIRES
+        esp_driver_gpio
+        esp_driver_spi
+        esp_rom
+        esp_timer
+)
