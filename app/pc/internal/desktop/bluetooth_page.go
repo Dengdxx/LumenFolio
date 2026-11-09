@@ -3,7 +3,6 @@ package desktop
 import (
 	"context"
 	"image"
-	"strings"
 
 	"gioui.org/layout"
 	"gioui.org/op"
@@ -13,23 +12,20 @@ import (
 	"gioui.org/widget/material"
 
 	"lumenfolio/devicehttp"
+	"lumenfolio/frameclient"
 	"lumenfolio/identity"
 	"lumenfolio/internal/blewindows"
-	"lumenfolio/ota"
 )
 
 // bluetoothPage 由窗口事件循环持有，扫描和连接只在后台交付结果。
 type bluetoothPage struct {
-	open        bool
-	host        string
-	id          identity.ID
-	selected    blewindows.Device
-	pendingHost string
-	ctx         context.Context
-	cancel      context.CancelFunc
-	status      string
-	devices     []blewindows.Device
-	results     chan bluetoothResult
+	open    bool
+	pending *frameclient.Frame
+	ctx     context.Context
+	cancel  context.CancelFunc
+	status  string
+	devices []blewindows.Device
+	results chan bluetoothResult
 
 	openButton, scanButton, disconnectButton, backButton widget.Clickable
 	buttons                                              []widget.Clickable
@@ -45,31 +41,13 @@ type bluetoothResult struct {
 
 const bluetoothInstruction = "长按相框 KEY3 打开蓝牙，再选择找到的相框。"
 
-func (u *ui) deviceHost() string {
-	if u.bluetooth.host != "" {
-		return u.bluetooth.host
-	}
-	return strings.TrimSpace(u.hostEditor.Text())
-}
-
-func (u *ui) deviceLabel(host string) string {
-	if host != "" && host == u.bluetooth.host {
-		label := u.bluetooth.selected.Name + " · 蓝牙"
-		if u.bluetooth.id != "" {
-			label += " · " + string(u.bluetooth.id)
-		}
-		return label
-	}
-	return host
-}
-
 func (u *ui) openBluetooth() {
 	p := &u.bluetooth
 	p.open = true
-	if p.host != "" {
-		p.status = "已连接 " + p.selected.Name
+	if u.bluetoothConnected() {
+		p.status = "已连接 " + u.session.Name()
 	}
-	if p.host == "" && p.ctx == nil {
+	if !u.bluetoothConnected() && p.ctx == nil {
 		u.scanBluetooth()
 	}
 }
@@ -92,21 +70,21 @@ func (u *ui) scanBluetooth() {
 
 func (u *ui) connectBluetooth(device blewindows.Device) {
 	p := &u.bluetooth
-	if p.ctx != nil || device.Address == p.selected.Address {
+	if p.ctx != nil || (u.bluetoothConnected() && u.session.Address() == device.Address) {
 		return
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	p.ctx, p.cancel = ctx, cancel
-	host := devicehttp.UseBluetooth(device.Address, func(ctx context.Context) (devicehttp.BluetoothLink, error) {
+	session := frameclient.OpenBluetooth(device.Name, device.Address, func(ctx context.Context) (devicehttp.BluetoothLink, error) {
 		return blewindows.Dial(ctx, device)
 	})
-	p.pendingHost = host
+	p.pending = session
 	p.status = "正在连接 " + device.Name + "，若系统提示配对，请确认。"
 	go func() {
-		_, err := ota.DeviceStatus(ctx, host, 8080)
+		_, err := session.Status(ctx)
 		var id identity.ID
 		if err == nil {
-			id, err = ota.DeviceID(ctx, host, 8080)
+			id, err = session.ID(ctx)
 		}
 		if err == nil {
 			err = u.checkFrameIdentity(id, identity.FromBluetooth(device.Address))
@@ -122,31 +100,35 @@ func (u *ui) postBluetooth(result bluetoothResult) {
 	}
 }
 
-func (p *bluetoothPage) apply(result bluetoothResult) {
+// applyBluetooth 安装连接成功的会话；失败或已取消时释放这次尝试。
+func (u *ui) applyBluetooth(result bluetoothResult) {
+	p := &u.bluetooth
 	canceled := p.ctx.Err() != nil
 	p.cancel()
 	p.ctx, p.cancel = nil, nil
-	pendingHost := p.pendingHost
-	p.pendingHost = ""
+	pending := p.pending
+	p.pending = nil
 	if canceled {
-		devicehttp.ForgetBluetooth(pendingHost)
+		if pending != nil {
+			pending.Close()
+		}
 		return
 	}
 	if result.err != nil {
-		devicehttp.ForgetBluetooth(pendingHost)
-		if pendingHost != "" {
+		if pending != nil {
+			pending.Close()
 			p.status = "连接未完成：" + result.err.Error()
 		} else {
 			p.status = "搜索失败：" + result.err.Error()
 		}
 		return
 	}
-	if pendingHost != "" {
-		devicehttp.ForgetBluetooth(p.host)
-		p.host, p.selected, p.id = pendingHost, result.device, result.id
-		p.status = "已连接 " + p.selected.Name
-		if p.id != "" {
-			p.status += " · " + string(p.id)
+	if pending != nil {
+		u.setSession(pending)
+		u.checkUploadStorage(storageProbeDelay)
+		p.status = "已连接 " + pending.Name()
+		if result.id != "" {
+			p.status += " · " + string(result.id)
 		}
 		return
 	}
@@ -158,9 +140,9 @@ func (p *bluetoothPage) apply(result bluetoothResult) {
 	}
 }
 
-func (p *bluetoothPage) disconnect() {
-	devicehttp.ForgetBluetooth(p.host)
-	p.host, p.selected, p.id = "", blewindows.Device{}, ""
+func (u *ui) disconnectBluetooth() {
+	u.closeSession()
+	p := &u.bluetooth
 	p.status = "已断开蓝牙，返回取景后可使用 Wi-Fi 地址。"
 }
 
@@ -173,8 +155,10 @@ func (p *bluetoothPage) back() {
 
 func (p *bluetoothPage) close() {
 	p.back()
-	devicehttp.ForgetBluetooth(p.host)
-	devicehttp.ForgetBluetooth(p.pendingHost)
+	if p.pending != nil {
+		p.pending.Close()
+		p.pending = nil
+	}
 }
 
 func (u *ui) bluetoothLayout(gtx layout.Context) layout.Dimensions {
@@ -203,7 +187,7 @@ func (u *ui) bluetoothLayout(gtx layout.Context) layout.Dimensions {
 						macro := op.Record(gtx.Ops)
 						dims := p.list.Layout(gtx, len(p.devices), func(gtx layout.Context, i int) layout.Dimensions {
 							device := p.devices[i]
-							if p.ctx != nil || device.Address == p.selected.Address {
+							if p.ctx != nil || (u.bluetoothConnected() && device.Address == u.session.Address()) {
 								gtx = gtx.Disabled()
 							}
 							return layout.Inset{Bottom: 4}.Layout(gtx,
@@ -215,14 +199,14 @@ func (u *ui) bluetoothLayout(gtx layout.Context) layout.Dimensions {
 						return dims
 					}),
 					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-						if p.host == "" {
+						if !u.bluetoothConnected() {
 							return layout.Dimensions{}
 						}
 						if p.ctx != nil {
 							gtx = gtx.Disabled()
 						}
 						return u.button("断开蓝牙并使用 Wi-Fi", &p.disconnectButton, func() {
-							p.disconnect()
+							u.disconnectBluetooth()
 							gtx.Execute(op.InvalidateCmd{})
 						})(gtx)
 					}),

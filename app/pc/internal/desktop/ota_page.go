@@ -1,7 +1,6 @@
 package desktop
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"image"
@@ -14,6 +13,7 @@ import (
 	"gioui.org/widget/material"
 	"gioui.org/x/explorer"
 
+	"lumenfolio/frameclient"
 	"lumenfolio/ota"
 )
 
@@ -91,7 +91,7 @@ func readOTAFirmware(file io.ReadCloser) (otaFirmware, error) {
 	if len(data) > maxSize {
 		return otaFirmware{}, errors.New("应用镜像超过 1.5 MiB")
 	}
-	version, err := ota.Inspect(bytes.NewReader(data), int64(len(data)))
+	version, err := frameclient.InspectFirmware(data)
 	if err != nil {
 		return otaFirmware{}, err
 	}
@@ -103,9 +103,14 @@ func readOTAFirmware(file io.ReadCloser) (otaFirmware, error) {
 }
 
 func (u *ui) startOTA() {
-	host := u.deviceHost()
-	if host == "" {
-		u.ota.progress = ota.Progress{Message: "先填写相框地址。"}
+	u.syncWiFiSession()
+	session := u.session
+	if session == nil {
+		message := "先填写相框地址。"
+		if u.wifiError != "" {
+			message = "相框地址无效：" + u.wifiError
+		}
+		u.ota.progress = ota.Progress{Message: message}
 		return
 	}
 	firmware := u.ota.firmware
@@ -113,7 +118,7 @@ func (u *ui) startOTA() {
 	u.ota.progress = ota.Progress{Message: "正在连接相框并核对固件…"}
 	go func() {
 		result := otaUpdate{finished: true}
-		err := ota.Upgrade(context.Background(), host, 8080, bytes.NewReader(firmware.data), int64(len(firmware.data)), func(progress ota.Progress) {
+		err := session.Upgrade(context.Background(), firmware.data, func(progress ota.Progress) {
 			u.postOTA(otaUpdate{progress: progress})
 		})
 		if err != nil {

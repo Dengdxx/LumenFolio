@@ -29,6 +29,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import org.lumenfolio.mobilepanel.Crop
+import org.lumenfolio.mobilepanel.DeviceSession
 import org.lumenfolio.mobilepanel.FrameTransferListener
 import org.lumenfolio.mobilepanel.Mobilepanel
 import org.lumenfolio.mobilepanel.OTAListener
@@ -52,7 +53,7 @@ internal enum class FrameDestination(val source: String, val label: String) {
 
 internal data class FrameUploadProgress(val stage: String, val percent: Int, val message: String)
 internal data class FrameUploadReply(val message: String, val error: Boolean = false)
-internal data class FrameBluetoothSelection(val host: String, val name: String, val address: String)
+internal data class FrameBluetoothSelection(val name: String, val address: String)
 
 /** 确认界面展示的版本和上传的数据来自同一份已选镜像。 */
 internal class SelectedFirmware(val name: String, val version: String, val data: ByteArray)
@@ -81,7 +82,16 @@ internal class FrameUploadViewModel(application: Application) : AndroidViewModel
         private set
     var bluetooth by mutableStateOf<FrameBluetoothSelection?>(null)
         private set
-    val host: String get() = bluetooth?.host ?: address.trim()
+
+    /**
+     * 当前相框会话。手填地址与蓝牙共用同一个句柄，操作不再依赖 host 字符串。
+     * gobind 生成的 equals 恒为真，状态必须按引用比较，否则换会话不会触发重组。
+     */
+    var session by mutableStateOf<DeviceSession?>(null, referentialEqualityPolicy())
+        private set
+
+    /** 会话对应的目标，用于判断地址变化后是否需要重建。 */
+    private var sessionTarget = ""
     var bluetoothConnecting by mutableStateOf(false)
         private set
     var bluetoothError by mutableStateOf<String?>(null)
@@ -103,6 +113,11 @@ internal class FrameUploadViewModel(application: Application) : AndroidViewModel
         private set
     var firmwareFeedback by mutableStateOf<FirmwareFeedback?>(null)
         private set
+
+    init {
+        // 手填地址的会话只在本地解析，不访问网络；连接失败留给首次请求报告。
+        openWiFiSession(address)
+    }
 
     private data class RenderCache(
         val editor: EditorPicture,
@@ -190,36 +205,78 @@ internal class FrameUploadViewModel(application: Application) : AndroidViewModel
     fun editAddress(value: String) {
         if (busy) return
         if (address.trim() != value.trim()) {
+            // 地址一变就换掉旧会话，避免后续操作继续打到上一台相框。
+            if (bluetooth == null) openWiFiSession(value)
             resetUploadDestination()
         }
         address = value
         reply = null
     }
 
+    /**
+     * 手填地址的会话只在本地解析，不访问网络。地址不完整时留空，
+     * 真正发起操作时由会话返回同一个错误。
+     */
+    private fun openWiFiSession(target: String) {
+        if (bluetooth != null) return
+        val trimmed = target.trim()
+        if (trimmed == sessionTarget && session != null) return
+        closeSession()
+        if (trimmed.isEmpty()) return
+        session = try {
+            Mobilepanel.connectWiFi(trimmed)
+        } catch (_: Exception) {
+            null
+        }
+        sessionTarget = trimmed
+    }
+
+    /** 关掉当前会话并清空槽位；会话关闭后可重复调用。 */
+    private fun closeSession() {
+        session?.close()
+        session = null
+        sessionTarget = ""
+    }
+
+    /** 先用新会话替换旧会话，保证切换过程中始终有一个可用句柄。 */
+    private fun installSession(device: DeviceSession, target: String) {
+        closeSession()
+        session = device
+        sessionTarget = target
+    }
+
     fun clearBluetoothError() {
         bluetoothError = null
     }
 
-    /** 先从 BLE 读取状态确认连接可用，再让相框操作切换到该连接。 */
+    /** 先从 BLE 读取状态确认连接可用，再用这个会话替换当前连接。 */
     fun connectBluetooth(frame: NearbyFrame) {
         if (busy || bluetooth != null) return
         bluetoothError = null
         bluetoothConnecting = true
         runOperation(failure = "蓝牙连接失败", onFailure = { bluetoothError = it }) {
-            var registeredHost: String? = null
+            var opened: DeviceSession? = null
             try {
-                bluetooth = withContext(Dispatchers.IO) {
-                    val target = Mobilepanel.useBluetooth(
-                        frame.address, FrameBluetoothDialer(getApplication<Application>(), frame.device),
+                val connected = withContext(Dispatchers.IO) {
+                    val device = Mobilepanel.connectBluetooth(
+                        frame.name, frame.address, FrameBluetoothDialer(getApplication<Application>(), frame.device),
                     )
-                    registeredHost = target
-                    Mobilepanel.deviceStatus(target)
-                    confirmFrameIdentity(Mobilepanel.deviceID(target), Mobilepanel.identityFromBluetooth(frame.address))
-                    FrameBluetoothSelection(target, frame.name, frame.address)
+                    try {
+                        device.status()
+                        confirmFrameIdentity(device.id(), Mobilepanel.identityFromBluetooth(frame.address))
+                    } catch (error: Exception) {
+                        // 核对失败时本次会话不能留给其他页面使用。
+                        device.close()
+                        throw error
+                    }
+                    device
                 }
+                opened = connected
+                installSession(connected, frame.address)
+                bluetooth = FrameBluetoothSelection(frame.name, frame.address)
                 resetUploadDestination()
             } finally {
-                registeredHost?.takeIf { it != bluetooth?.host }?.let(Mobilepanel::forgetBluetooth)
+                opened?.takeIf { it !== session }?.close()
                 bluetoothConnecting = false
             }
         }
@@ -227,14 +284,15 @@ internal class FrameUploadViewModel(application: Application) : AndroidViewModel
 
     fun disconnectBluetooth() {
         if (busy) return
-        bluetooth?.let { Mobilepanel.forgetBluetooth(it.host) }
+        closeSession()
         bluetooth = null
+        openWiFiSession(address)
         resetUploadDestination()
         reply = null
     }
 
     override fun onCleared() {
-        bluetooth?.let { Mobilepanel.forgetBluetooth(it.host) }
+        closeSession()
         super.onCleared()
     }
 
@@ -250,16 +308,16 @@ internal class FrameUploadViewModel(application: Application) : AndroidViewModel
         reply = null
     }
 
-    /** 地址变化后探测 SD 卡，手动选择优先于后台回执。 */
-    suspend fun detectUploadDestination(host: String) {
-        if (host.isEmpty() || busy || manualDestination) return
+    /** 地址变化后探测 SD 卡，手动选择优先于后台回执。会话已被替换时丢弃本次结果。 */
+    suspend fun detectUploadDestination(device: DeviceSession?) {
+        if (device == null || busy || manualDestination) return
         uploadDestination = null
         delay(350)
         if (manualDestination) return
         val sdAvailable = try {
             withContext(Dispatchers.IO) {
-                val available = Mobilepanel.deviceStorage(host).sdAvailable()
-                confirmFrameIdentity(Mobilepanel.deviceID(host), frameIdentity)
+                val available = device.storage().sdAvailable()
+                confirmFrameIdentity(device.id(), frameIdentity)
                 available
             }
         } catch (error: CancellationException) {
@@ -269,15 +327,17 @@ internal class FrameUploadViewModel(application: Application) : AndroidViewModel
             false
         }
         currentCoroutineContext().ensureActive()
-        if (host == this.host) identityNotice = null
-        if (host == this.host && !manualDestination) {
+        if (device === session) identityNotice = null
+        if (device === session && !manualDestination) {
             uploadDestination = if (sdAvailable) FrameDestination.SD else FrameDestination.FLASH
         }
     }
 
     /** 传图、浏览和固件升级共用上次成功的 Wi-Fi 地址，蓝牙选择只在本次运行有效。 */
-    fun rememberAddress(host: String) {
-        if (host == address.trim()) preferences.edit().putString("frame_address", host).apply()
+    fun rememberConnection(device: DeviceSession) {
+        if (bluetooth != null || device !== session) return
+        val target = address.trim()
+        if (target.isNotEmpty()) preferences.edit().putString("frame_address", target).apply()
     }
 
     /**
@@ -285,14 +345,17 @@ internal class FrameUploadViewModel(application: Application) : AndroidViewModel
      * 确认成功后记住这台相框；Wi-Fi 地址只在这次走的是手填地址时更新。
      */
     /** 图库刷新时核对 Wi-Fi 相框。核对失败只留下提示，不打断已经读到的列表。 */
-    fun confirmWiFiIdentity(host: String, known: String) {
+    fun confirmWiFiIdentity(device: DeviceSession, known: String) {
         val notice = try {
-            confirmFrameIdentity(Mobilepanel.deviceID(host), known)
+            confirmFrameIdentity(device.id(), known)
             null
         } catch (error: Exception) {
             error.localizedMessage ?: "没能确认相框身份"
         }
-        viewModelScope.launch { identityNotice = notice }
+        viewModelScope.launch {
+            // 核对期间换了相框就丢弃旧结果，避免提示指向另一台设备。
+            if (device === session) identityNotice = notice
+        }
     }
 
     private fun confirmFrameIdentity(reported: String, known: String) {
@@ -308,8 +371,7 @@ internal class FrameUploadViewModel(application: Application) : AndroidViewModel
         val snapshot = editor ?: return
         val destination = uploadDestination ?: return
         val preset = algorithm
-        val host = this.host
-        if (host.isEmpty()) return
+        val device = session ?: return
         runOperation(upload = true, failure = "没能发送画面", onFailure = { reply = FrameUploadReply(it, error = true) }) {
             val rendered = render(snapshot, preset)
             val frame = processImage { rendered.frame() }
@@ -318,8 +380,8 @@ internal class FrameUploadViewModel(application: Application) : AndroidViewModel
                 val collector = launch { updates.collect { uploadProgress = it } }
                 try {
                     withContext(Dispatchers.IO) {
-                        Mobilepanel.uploadDeviceFrame(
-                            host, frame, destination.source, snapshot.name,
+                        device.send(
+                            frame, destination.source, snapshot.name,
                             object : FrameTransferListener {
                                 override fun onFrameProgress(stage: String, percent: Int, message: String) {
                                     updates.value = FrameUploadProgress(stage, percent, message)
@@ -332,7 +394,7 @@ internal class FrameUploadViewModel(application: Application) : AndroidViewModel
                     uploadProgress = updates.value
                 }
             }
-            rememberAddress(host)
+            rememberConnection(device)
             reply = FrameUploadReply(response)
         }
     }
@@ -381,8 +443,7 @@ internal class FrameUploadViewModel(application: Application) : AndroidViewModel
     /** ViewModel 持有升级任务，配置变化时重用同一事务，避免重新上传或丢失确认。 */
     fun upgradeFirmware() {
         val selected = firmware ?: return
-        val host = this.host
-        if (host.isEmpty()) return
+        val device = session ?: return
         runOperation(failure = "固件升级未确认", onFailure = ::firmwareError) {
             coroutineScope {
                 val updates = MutableStateFlow(FirmwareFeedback("正在查询相框…"))
@@ -390,7 +451,7 @@ internal class FrameUploadViewModel(application: Application) : AndroidViewModel
                 val collector = launch { updates.collect { firmwareFeedback = it } }
                 try {
                     withContext(Dispatchers.IO) {
-                        Mobilepanel.upgradeFirmware(host, selected.data, object : OTAListener {
+                        device.upgrade(selected.data, object : OTAListener {
                             override fun onProgress(message: String, sent: Long, total: Long) {
                                 val fraction = if (total > 0) (sent.toFloat() / total).coerceIn(0f, 1f) else null
                                 updates.value = FirmwareFeedback(message, fraction)
@@ -401,7 +462,7 @@ internal class FrameUploadViewModel(application: Application) : AndroidViewModel
                     collector.cancel()
                 }
             }
-            rememberAddress(host)
+            rememberConnection(device)
             firmware = null
             firmwareFeedback = FirmwareFeedback("固件 ${selected.version} 已启动并确认。")
         }

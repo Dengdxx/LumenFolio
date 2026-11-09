@@ -61,6 +61,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import org.lumenfolio.mobilepanel.DeviceSession
 import org.lumenfolio.mobilepanel.Mobilepanel
 
 /** Go 读取返回前始终占用一个传输名额，即使列表已切换或退出。 */
@@ -72,12 +73,20 @@ private enum class PictureSource(val id: String, val label: String) {
 }
 
 private data class DevicePicture(val id: String, val name: String, val revision: String)
-private data class PictureListRequest(val host: String, val source: PictureSource, val refresh: Int)
+
+/**
+ * 读取目标。gobind 生成的 DeviceSession.equals 恒为真，界面去重必须按实例比较，
+ * 否则换相框后 remember / LaunchedEffect 不会重新执行。
+ */
+private class FrameTarget(val device: DeviceSession)
+
+private data class PictureListRequest(val target: FrameTarget, val source: PictureSource, val refresh: Int)
+private data class InfoRequest(val target: FrameTarget, val refresh: Int)
 private data class DevicePicturePage(val pictures: List<DevicePicture>, val next: String)
 
 /** 当前请求的 ID 用于列表去重，revision 用于区分同名画面内容的变化。 */
 private fun readDevicePicturePage(request: PictureListRequest, after: String): DevicePicturePage {
-    val page = Mobilepanel.listDevicePicturePage(request.host, request.source.id, after)
+    val page = request.target.device.pictures(request.source.id, after)
     val pictures = List(page.count()) { index -> DevicePicture(page.id(index), page.name(index), page.revision(index)) }
     return DevicePicturePage(pictures.distinctBy { it.id }, page.next())
 }
@@ -92,26 +101,28 @@ private sealed interface PictureRead<out T> {
 internal fun DevicePicturesScreen(
     address: String,
     bluetooth: FrameBluetoothSelection?,
+    session: DeviceSession?,
     identity: String,
     identityNotice: String?,
     onAddressChange: (String) -> Unit,
-    onConnected: (String) -> Unit,
-    onIdentity: (String, String) -> Unit,
+    onConnected: (DeviceSession) -> Unit,
+    onIdentity: (DeviceSession, String) -> Unit,
     onBluetooth: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val focusManager = LocalFocusManager.current
-    val connectionHost = bluetooth?.host ?: address.trim()
-    var host by remember(bluetooth?.host) { mutableStateOf(connectionHost) }
+    val connection = session?.let { FrameTarget(it) }
+    // 读取目标只在首帧或切换连接方式时采用当前会话，之后由用户点“读取列表”提交。
+    var target by remember(bluetooth?.address) { mutableStateOf(connection) }
     var source by rememberSaveable { mutableStateOf(PictureSource.ARTIFACTS) }
     var listRefresh by remember { mutableStateOf(0) }
     var infoRefresh by remember { mutableStateOf(0) }
-    val request = PictureListRequest(host, source, listRefresh)
+    val request = target?.let { PictureListRequest(it, source, listRefresh) }
     var selected by remember(request) { mutableStateOf<DevicePicture?>(null) }
     val listState = rememberLazyListState()
     val thumbnails = remember(request) { mutableStateMapOf<DevicePicture, ImageBitmap?>() }
-    val result = if (request.host.isNotEmpty()) {
-        readPicture(request, onSuccess = { onConnected(request.host) }) {
+    val result = if (request != null) {
+        readPicture(request, onSuccess = { onConnected(request.target.device) }) {
             readDevicePicturePage(request, "")
         }
     } else {
@@ -123,7 +134,7 @@ internal fun DevicePicturesScreen(
     val next = page?.next.orEmpty()
     var loadingMore by remember(request, next, selected) { mutableStateOf(false) }
     var loadMoreError by remember(request) { mutableStateOf<String?>(null) }
-    if (next.isNotEmpty() && selected == null && loadMoreError == null) {
+    if (request != null && next.isNotEmpty() && selected == null && loadMoreError == null) {
         LaunchedEffect(request, next) {
             val tail = pictures.takeLast(2).mapTo(mutableSetOf<Any>()) { it.id }
             snapshotFlow { tail.isEmpty() || listState.layoutInfo.visibleItemsInfo.any { it.key in tail } }.first { it }
@@ -140,11 +151,11 @@ internal fun DevicePicturesScreen(
             }
         }
     }
-    val infoRequest = host to infoRefresh
-    val storage = if (host.isNotEmpty()) {
-        readPicture(infoRequest) {
-            val capacity = Mobilepanel.deviceStorage(infoRequest.first)
-            if (bluetooth == null) onIdentity(infoRequest.first, identity)
+    val committed = target
+    val storage = if (committed != null) {
+        readPicture(InfoRequest(committed, infoRefresh)) {
+            val capacity = committed.device.storage()
+            if (bluetooth == null) onIdentity(committed.device, identity)
             capacity.flash() to capacity.sd()
         }
     } else {
@@ -156,13 +167,13 @@ internal fun DevicePicturesScreen(
         is PictureRead.Success -> storage.value
         is PictureRead.Failure -> "容量不可用" to "容量不可用"
     }
-    val status = if (host.isNotEmpty()) {
-        readPicture(infoRequest) { Mobilepanel.deviceStatus(infoRequest.first) }
+    val status = if (committed != null) {
+        readPicture(InfoRequest(committed, infoRefresh)) { committed.device.status() }
     } else {
         null
     }
 
-    if (result is PictureRead.Success && selected == null) {
+    if (request != null && result is PictureRead.Success && selected == null) {
         LaunchedEffect(request, pictures) {
             val indices = pictures.withIndex().associate { it.value.id to it.index }
             snapshotFlow {
@@ -181,8 +192,8 @@ internal fun DevicePicturesScreen(
                     thumbnails[picture] = try {
                         thumbnailTransfer.withLock {
                             withContext(Dispatchers.IO) {
-                                val png = Mobilepanel.thumbnailDevicePictureFor(
-                                    request.host, request.source.id, picture.id, picture.revision,
+                                val png = request.target.device.thumbnail(
+                                    request.source.id, picture.id, picture.revision,
                                 )
                                 BitmapFactory.decodeByteArray(png, 0, png.size)?.asImageBitmap()
                             }
@@ -224,7 +235,7 @@ internal fun DevicePicturesScreen(
                         identity = identity,
                         onAddressChange = { value ->
                             onAddressChange(value)
-                            host = ""
+                            target = null
                         },
                         onBluetooth = onBluetooth,
                     )
@@ -251,15 +262,15 @@ internal fun DevicePicturesScreen(
                         Button(
                             onClick = {
                                 focusManager.clearFocus()
-                                host = connectionHost
+                                target = connection
                                 listRefresh++
                             },
-                            enabled = connectionHost.isNotEmpty() && result != PictureRead.Loading,
+                            enabled = session != null && result != PictureRead.Loading,
                             modifier = Modifier.weight(1f),
                         ) {
-                            Text(if (host.isEmpty()) "读取列表" else "刷新列表")
+                            Text(if (target == null) "读取列表" else "刷新列表")
                         }
-                        if (host.isNotEmpty()) {
+                        if (target != null) {
                             OutlinedButton(
                                 onClick = { infoRefresh++ },
                                 enabled = storage != PictureRead.Loading && status != PictureRead.Loading,
@@ -319,17 +330,20 @@ internal fun DevicePicturesScreen(
         }
     }
 
-    selected?.let { picture ->
-        DevicePicturePreview(
-            request,
-            picture,
-            onDismiss = { selected = null },
-            onDeleted = {
-                selected = null
-                listRefresh++
-                infoRefresh++
-            },
-        )
+    val currentRequest = request
+    if (currentRequest != null) {
+        selected?.let { picture ->
+            DevicePicturePreview(
+                currentRequest,
+                picture,
+                onDismiss = { selected = null },
+                onDeleted = {
+                    selected = null
+                    listRefresh++
+                    infoRefresh++
+                },
+            )
+        }
     }
 }
 
@@ -350,7 +364,7 @@ private fun DevicePicturePreview(
     var deleteError by remember(request, picture.id) { mutableStateOf<String?>(null) }
     val deleteColors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)
     val result = readPicture(picture.id) {
-        val png = Mobilepanel.previewDevicePicture(request.host, request.source.id, picture.id)
+        val png = request.target.device.preview(request.source.id, picture.id)
         BitmapFactory.decodeByteArray(png, 0, png.size)
             ?: throw IOException("无法解码相框图片")
     }
@@ -378,7 +392,7 @@ private fun DevicePicturePreview(
                             scope.launch {
                                 try {
                                     withContext(Dispatchers.IO) {
-                                        Mobilepanel.deleteDevicePicture(request.host, request.source.id, picture.id)
+                                        request.target.device.delete(request.source.id, picture.id)
                                     }
                                 } catch (error: CancellationException) {
                                     throw error
@@ -435,7 +449,7 @@ private fun DevicePicturePreview(
                         scope.launch {
                             display = try {
                                 withContext(Dispatchers.IO) {
-                                    Mobilepanel.displayDevicePicture(request.host, request.source.id, picture.id)
+                                    request.target.device.display(request.source.id, picture.id)
                                 }
                                 PictureRead.Success(Unit)
                             } catch (error: CancellationException) {

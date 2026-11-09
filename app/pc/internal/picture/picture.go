@@ -7,6 +7,7 @@ import (
 	"image"
 
 	"lumenfolio/frame"
+	"lumenfolio/frameclient"
 	"lumenfolio/panel"
 )
 
@@ -28,16 +29,18 @@ func Encode(alg int, src image.Image, crop panel.Crop) ([]byte, error) {
 	return encoded, nil
 }
 
-// Send 把当前构图编成一帧并发到设备。host 为空时返回错误。
-func Send(ctx context.Context, host string, port, alg int, src image.Image, crop panel.Crop) (string, error) {
-	if host == "" {
-		return "", fmt.Errorf("缺少设备地址")
+// Send 把当前构图编成一帧，经已打开的相框会话发到 Flash 上传槽。
+//
+// 会话由调用方打开并在用完后关闭；命令行传入 frameclient.WiFi 建立的会话。
+func Send(ctx context.Context, session *frameclient.Frame, alg int, src image.Image, crop panel.Crop) (string, error) {
+	if session == nil {
+		return "", fmt.Errorf("缺少相框会话")
 	}
 	encoded, err := Encode(alg, src, crop)
 	if err != nil {
 		return "", err
 	}
-	return frame.Send(ctx, host, port, encoded)
+	return session.Send(ctx, encoded, frame.Flash, "", nil)
 }
 
 // SendTo 编码当前构图，保存到选定存储并等待相框完成 SPI 交付。

@@ -9,8 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 
+	"lumenfolio/frameclient"
 	"lumenfolio/identity"
-	"lumenfolio/ota"
 )
 
 // rememberedFrame 只记一台：上次确认过身份的相框，以及它当时的 Wi-Fi 地址。
@@ -101,11 +101,19 @@ func (u *ui) rememberFrame(id identity.ID, address string) {
 	saveRememberedFrame(saved)
 }
 
-// identifyWiFi 读取手填地址对应的相框身份，并和已记住的那台核对。
-func (u *ui) identifyWiFi(ctx context.Context, host string) (identity.ID, error) {
-	id, err := ota.DeviceID(ctx, host, 8080)
+// identifySession 读取会话对应的相框身份，并和已记住的那台核对。
+func (u *ui) identifySession(ctx context.Context, session *frameclient.Frame) (identity.ID, error) {
+	id, err := session.ID(ctx)
 	if err != nil {
 		return "", err
 	}
 	return id, u.checkFrameIdentity(id, u.remembered.ID)
+}
+
+// rememberAddress 是当前会话可写入记忆的 Wi-Fi 地址。蓝牙不覆盖已记地址。
+func (u *ui) rememberAddress() string {
+	if u.session != nil && u.session.Kind() == frameclient.LinkWiFi {
+		return u.wifiAddress
+	}
+	return ""
 }

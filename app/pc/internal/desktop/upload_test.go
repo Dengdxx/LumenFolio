@@ -14,7 +14,9 @@ import (
 	"gioui.org/unit"
 	"gioui.org/widget"
 
+	"lumenfolio/devicehttp"
 	"lumenfolio/frame"
+	"lumenfolio/frameclient"
 	"lumenfolio/panel"
 )
 
@@ -35,8 +37,9 @@ func TestUploadStorageChoosesAvailableTarget(t *testing.T) {
 		t.Fatal("已挂载 SD 卡时应默认选择 SD 卡")
 	}
 
-	p.host = "frame"
-	u.hostEditor.SetText(p.host)
+	u.setSession(testWiFiSession(t, "frame"))
+	u.wifiAddress = "frame"
+	u.hostEditor.SetText("frame")
 	p.flashButton.Click()
 	var ops op.Ops
 	u.uploadLayout(layout.Context{Ops: &ops, Metric: unit.Metric{PxPerDp: 1, PxPerSp: 1},
@@ -66,6 +69,28 @@ func TestUploadStorageChoosesAvailableTarget(t *testing.T) {
 	}
 }
 
+func TestDisconnectingBluetoothRestoresTheTypedAddress(t *testing.T) {
+	u := newTestUI()
+	u.hostEditor.SetText("192.168.137.42")
+	bluetooth := frameclient.OpenBluetooth("LumenFolio", "01:02:03:04:05:06", func(context.Context) (devicehttp.BluetoothLink, error) {
+		t.Fatal("断开后不应再拨号")
+		return nil, context.Canceled
+	})
+	u.setSession(bluetooth)
+	u.uploadLayout(layout.Context{Ops: new(op.Ops), Metric: unit.Metric{PxPerDp: 1, PxPerSp: 1},
+		Constraints: layout.Exact(image.Pt(216, 116))})
+	if u.session != bluetooth {
+		t.Fatal("蓝牙连接期间手填地址不应替换会话")
+	}
+
+	u.disconnectBluetooth()
+	u.uploadLayout(layout.Context{Ops: new(op.Ops), Metric: unit.Metric{PxPerDp: 1, PxPerSp: 1},
+		Constraints: layout.Exact(image.Pt(216, 116))})
+	if u.session == nil || u.session.Kind() != frameclient.LinkWiFi || u.session.Address() != "192.168.137.42" {
+		t.Fatal("断开蓝牙后应恢复手填的 Wi-Fi 地址")
+	}
+}
+
 func TestUploadProgressKeepsFileOperationBusy(t *testing.T) {
 	u := newTestUI()
 	u.window = &waitingWindow{wake: make(chan struct{}, 1)}
@@ -88,8 +113,9 @@ func TestUploadControlsFitMinimumWindow(t *testing.T) {
 	u := newTestUI()
 	u.rawImage = image.NewNRGBA(image.Rect(0, 0, 120, 160))
 	u.crop = panel.NewCrop(u.rawImage.Bounds())
-	u.upload.host = "frame"
-	u.hostEditor.SetText(u.upload.host)
+	u.setSession(testWiFiSession(t, "frame"))
+	u.wifiAddress = "frame"
+	u.hostEditor.SetText("frame")
 	u.upload.sdAvailable = true
 
 	var r input.Router

@@ -15,6 +15,7 @@ import (
 	"gioui.org/text"
 	"gioui.org/unit"
 
+	"lumenfolio/frameclient"
 	"lumenfolio/gallery"
 	"lumenfolio/panel"
 )
@@ -23,13 +24,24 @@ func newTestUI() *ui {
 	return newUI(text.NewShaper(text.NoSystemFonts(), text.WithCollection(gofont.Collection())), "")
 }
 
+// testWiFiSession 只手填地址建一次会话，不访问网络。
+func testWiFiSession(t *testing.T, address string) *frameclient.Frame {
+	t.Helper()
+	session, err := frameclient.WiFi(address)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return session
+}
+
 func TestGalleryStatusRefreshKeepsPictures(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		u := newTestUI()
 		u.window = &waitingWindow{wake: make(chan struct{}, 1)}
 		g := &u.gallery
 		// 测试点击后的状态变化，非法地址让后台请求在发网前返回。
-		g.host = "invalid host"
+		u.setSession(testWiFiSession(t, "invalid host"))
+		u.wifiAddress = "invalid host"
 		g.pictures = []gallery.Picture{{ID: "boot", Name: "开机画面"}}
 		g.selected = "boot"
 		img := paint.NewImageOp(image.NewNRGBA(image.Rect(0, 0, 12, 16)))

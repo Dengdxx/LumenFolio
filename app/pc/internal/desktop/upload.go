@@ -3,6 +3,7 @@ package desktop
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"gioui.org/layout"
@@ -10,13 +11,15 @@ import (
 	"gioui.org/widget/material"
 
 	"lumenfolio/frame"
-	"lumenfolio/gallery"
+	"lumenfolio/frameclient"
 	"lumenfolio/identity"
 	"lumenfolio/internal/picture"
 )
 
+// storageProbeDelay 让手填地址先稳定下来，避免输入过程中反复探测。
+const storageProbeDelay = 350 * time.Millisecond
+
 type uploadPanel struct {
-	host        string
 	sdAvailable bool
 	preferFlash bool
 	probeFailed bool
@@ -34,6 +37,7 @@ type uploadPanel struct {
 
 type uploadStorageResult struct {
 	probe       context.Context
+	address     string // 探测时的 Wi-Fi 地址；蓝牙会话为空，不覆盖已记地址
 	sdAvailable bool
 	id          identity.ID
 	err         error
@@ -74,31 +78,50 @@ func (u *ui) applyStorage(result uploadStorageResult) bool {
 	p.probeFailed = result.err != nil
 	p.sdAvailable = !p.probeFailed && result.sdAvailable
 	if result.err == nil {
-		u.rememberFrame(result.id, p.host)
+		u.rememberFrame(result.id, result.address)
 	}
 	return true
 }
 
-func (u *ui) syncUploadHost() {
-	host := u.deviceHost()
-	p := &u.upload
-	if host != p.host {
-		p.host = host
-		p.preferFlash = false
-		p.sdAvailable = false
-		p.probeFailed = false
-		u.checkUploadStorage(350 * time.Millisecond)
+// syncWiFiSession 让当前会话跟随手填地址。蓝牙已连接时地址框不生效。
+//
+// 新地址建立新会话，旧 Wi-Fi 会话先关闭。地址解析失败时保留原因供界面展示。
+func (u *ui) syncWiFiSession() {
+	if u.bluetoothConnected() {
+		return
 	}
+	address := strings.TrimSpace(u.hostEditor.Text())
+	if address == u.wifiAddress {
+		if u.session != nil || address == "" || u.wifiError != "" {
+			return
+		}
+	}
+	u.wifiAddress = address
+	if address == "" {
+		u.wifiError = ""
+		u.setSession(nil)
+		return
+	}
+	session, err := frameclient.WiFi(address)
+	if err != nil {
+		u.wifiError = err.Error()
+		u.setSession(nil)
+		return
+	}
+	u.wifiError = ""
+	u.setSession(session)
+	u.checkUploadStorage(storageProbeDelay)
 }
 
-// checkUploadStorage 在地址稳定后读取容量，切换地址时取消原请求。
+// checkUploadStorage 在地址稳定后读取容量，切换会话时取消原请求。
 func (u *ui) checkUploadStorage(delay time.Duration) {
 	p := &u.upload
 	p.stopProbe()
-	if p.host == "" {
+	session := u.session
+	if session == nil {
 		return
 	}
-	host := p.host
+	address := u.rememberAddress()
 	ctx, cancel := context.WithCancel(context.Background())
 	p.probe, p.cancelProbe = ctx, cancel
 	go func() {
@@ -111,12 +134,12 @@ func (u *ui) checkUploadStorage(delay time.Duration) {
 				return
 			}
 		}
-		storage, err := gallery.Storage(ctx, host, 8080)
+		storage, err := session.Storage(ctx)
 		var id identity.ID
 		if err == nil {
-			id, err = u.identifyWiFi(ctx, host)
+			id, err = u.identifySession(ctx, session)
 		}
-		result := uploadStorageResult{probe: ctx, sdAvailable: storage.SD.TotalBytes != 0, id: id, err: err}
+		result := uploadStorageResult{probe: ctx, address: address, sdAvailable: storage.SD.TotalBytes != 0, id: id, err: err}
 		select {
 		case p.storageResults <- result:
 			if u.window != nil {
@@ -135,10 +158,14 @@ func (u *ui) onUpload() {
 		u.status = "先打开一张图片"
 		return
 	}
-	u.syncUploadHost()
+	u.syncWiFiSession()
 	p := &u.upload
-	if p.host == "" {
+	session := u.session
+	if session == nil {
 		u.status = "先填写相框地址"
+		if u.wifiError != "" {
+			u.status = "相框地址无效：" + u.wifiError
+		}
 		return
 	}
 	if p.probe != nil {
@@ -148,14 +175,18 @@ func (u *ui) onUpload() {
 	p.cancelSend = cancel
 	u.fileBusy = true
 	p.progress = frame.Progress{Message: "正在编码画面…"}
-	host, target, name := p.host, p.target(), u.name
+	target, name := p.target(), u.name
 	alg, crop, src := u.alg, u.crop, u.rawImage
 	go func() {
 		var last frame.Progress
-		reply, err := picture.SendTo(ctx, host, 8080, alg, src, crop, target, name, func(progress frame.Progress) {
-			last = progress
-			u.postUpload(ctx, uploadUpdate{progress: progress})
-		})
+		data, err := picture.Encode(alg, src, crop)
+		var reply string
+		if err == nil {
+			reply, err = session.Send(ctx, data, target, name, func(progress frame.Progress) {
+				last = progress
+				u.postUpload(ctx, uploadUpdate{progress: progress})
+			})
+		}
 		if err != nil {
 			last.Message = "上传未完成：" + err.Error()
 		} else {
@@ -184,7 +215,7 @@ func (u *ui) postUpload(ctx context.Context, update uploadUpdate) {
 }
 
 func (u *ui) uploadLayout(gtx layout.Context) layout.Dimensions {
-	u.syncUploadHost()
+	u.syncWiFiSession()
 	p := &u.upload
 	status, detect := "上传位置", "检测"
 	switch {
@@ -192,10 +223,12 @@ func (u *ui) uploadLayout(gtx layout.Context) layout.Dimensions {
 		status = "正在检测 SD 卡…"
 	case p.probeFailed:
 		status, detect = "无法检测 SD 卡", "重试"
-	case p.host != "" && !p.sdAvailable:
+	case u.session != nil && !p.sdAvailable:
 		status = "未检测到 SD 卡"
+	case u.session == nil && u.wifiError != "":
+		status = "相框地址无效"
 	}
-	available := !u.fileBusy && p.host != "" && p.probe == nil
+	available := !u.fileBusy && u.session != nil && p.probe == nil
 	return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			return layout.Flex{Alignment: layout.Middle, Spacing: layout.SpaceBetween}.Layout(gtx,

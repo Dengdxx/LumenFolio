@@ -27,7 +27,7 @@ func (u *ui) layout(gtx layout.Context) layout.Dimensions {
 }
 
 func (u *ui) pageLayout(gtx layout.Context) layout.Dimensions {
-	if u.gallery.host != "" {
+	if u.gallery.open {
 		return u.galleryLayout(gtx)
 	}
 	if u.ota.open {
@@ -63,12 +63,12 @@ func (u *ui) sidebar(gtx layout.Context) layout.Dimensions {
 			layout.Rigid(gap(14)),
 			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 				label := "相框 IP 或主机名"
-				if u.bluetooth.host != "" {
+				if u.bluetoothConnected() {
 					label = "相框连接"
 				}
 				return layout.Flex{Alignment: layout.Middle, Spacing: layout.SpaceBetween}.Layout(gtx,
 					layout.Rigid(u.section(label)),
-					layout.Rigid(u.uploadChoice("蓝牙", &u.bluetooth.openButton, u.bluetooth.host != "", !u.fileBusy, u.openBluetooth)),
+					layout.Rigid(u.uploadChoice("蓝牙", &u.bluetooth.openButton, u.bluetoothConnected(), !u.fileBusy, u.openBluetooth)),
 				)
 			}),
 			layout.Rigid(gap(6)),

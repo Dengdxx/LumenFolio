@@ -19,6 +19,7 @@ import (
 	"gioui.org/widget/material"
 	"gioui.org/x/explorer"
 
+	"lumenfolio/frameclient"
 	"lumenfolio/panel"
 )
 
@@ -104,6 +105,11 @@ type ui struct {
 	bluetooth  bluetoothPage
 	remembered rememberedFrame
 
+	// session 是当前相框会话；为空即未连接。取景、图库和固件都从它发起操作。
+	session     *frameclient.Frame
+	wifiAddress string // 当前 Wi-Fi 会话对应的手填地址，用于发现地址变化
+	wifiError   string // 手填地址无法解析时的原因
+
 	// 交互状态
 	canvasTag bool
 	gesture   dragGesture
@@ -161,6 +167,7 @@ func newUI(shaper *text.Shaper, initialFile string) *ui {
 }
 
 func (u *ui) run(w *app.Window) error {
+	defer u.closeSession()
 	defer u.closeGallery()
 	defer u.upload.close()
 	defer u.bluetooth.close()
@@ -252,7 +259,7 @@ func (u *ui) applyPendingResults() (changed bool) {
 			changed = true
 		case result := <-u.gallery.results:
 			if result.err == nil && result.frameID != "" {
-				u.rememberFrame(result.frameID, u.gallery.host)
+				u.rememberFrame(result.frameID, result.address)
 			}
 			if u.gallery.applyResult(result) {
 				u.loadGallery(u.gallery.source)
@@ -270,10 +277,46 @@ func (u *ui) applyPendingResults() (changed bool) {
 			}
 			changed = true
 		case result := <-u.bluetooth.results:
-			u.bluetooth.apply(result)
+			u.applyBluetooth(result)
 			changed = true
 		default:
 			return changed
 		}
 	}
+}
+
+// setSession 切换相框会话，先关闭旧会话，再清掉旧会话的容量探测状态。
+func (u *ui) setSession(session *frameclient.Frame) {
+	if u.session == session {
+		return
+	}
+	if u.session != nil {
+		u.session.Close()
+	}
+	u.session = session
+	p := &u.upload
+	p.stopProbe()
+	p.preferFlash = false
+	p.sdAvailable = false
+	p.probeFailed = false
+}
+
+// closeSession 关闭当前会话。之后所有设备操作都按未连接处理。
+func (u *ui) closeSession() { u.setSession(nil) }
+
+// bluetoothConnected 报告当前会话是否走蓝牙。
+func (u *ui) bluetoothConnected() bool {
+	return u.session != nil && u.session.Kind() == frameclient.LinkBluetooth
+}
+
+// deviceLabel 是连接状态展示文本：蓝牙带设备名和公开地址，Wi-Fi 只有主机名。
+func (u *ui) deviceLabel() string {
+	session := u.session
+	if session == nil {
+		return ""
+	}
+	if session.Kind() == frameclient.LinkBluetooth {
+		return session.Name() + " · 蓝牙 · " + session.Address()
+	}
+	return session.Name()
 }

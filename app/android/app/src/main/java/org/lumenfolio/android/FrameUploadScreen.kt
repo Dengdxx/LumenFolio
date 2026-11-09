@@ -111,10 +111,11 @@ internal fun FrameUploadScreen(model: FrameUploadViewModel) {
             FramePage.PICTURES -> DevicePicturesScreen(
                 address = model.address,
                 bluetooth = model.bluetooth,
+                session = model.session,
                 identity = model.frameIdentity,
                 identityNotice = model.identityNotice,
                 onAddressChange = model::editAddress,
-                onConnected = model::rememberAddress,
+                onConnected = model::rememberConnection,
                 onIdentity = model::confirmWiFiIdentity,
                 onBluetooth = openBluetooth,
                 modifier = contentModifier,
@@ -320,10 +321,13 @@ private fun FrameUploadPanel(
     val colors = MaterialTheme.colorScheme
     val focusManager = LocalFocusManager.current
     val ready = model.editor != null && !model.busy
-    val host = model.host
+    val device = model.session
+    val connected = device != null
+    val connectionKey = model.bluetooth?.address ?: model.address.trim()
     val progress = model.uploadProgress
     val reply = model.reply
-    LaunchedEffect(host) { model.detectUploadDestination(host) }
+    // DeviceSession 的 equals 由 gobind 生成且恒为真，用连接标识而不是会话实例作为键。
+    LaunchedEffect(connectionKey) { model.detectUploadDestination(device) }
     Panel {
         Row(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -354,12 +358,12 @@ private fun FrameUploadPanel(
                 FilterChip(
                     selected = model.uploadDestination == destination,
                     onClick = { model.selectUploadDestination(destination) },
-                    enabled = !model.busy && host.isNotEmpty(),
+                    enabled = !model.busy && connected,
                     label = { Text(destination.label) },
                 )
             }
         }
-        if (host.isNotEmpty() && model.uploadDestination == null) {
+        if (connected && model.uploadDestination == null) {
             Text(
                 "正在检测 SD 卡，也可以直接选择存储位置。",
                 color = colors.onSurfaceVariant,
@@ -371,7 +375,7 @@ private fun FrameUploadPanel(
                 focusManager.clearFocus()
                 model.sendPicture()
             },
-            enabled = ready && host.isNotEmpty() && model.uploadDestination != null,
+            enabled = ready && connected && model.uploadDestination != null,
             shape = ControlShape,
             modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
         ) {

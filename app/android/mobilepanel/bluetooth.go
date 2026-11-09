@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"lumenfolio/devicehttp"
+	"lumenfolio/frameclient"
 )
 
 // BluetoothConnection 由 Android GATT 客户端实现。每次读写等待本次操作的系统回调。
@@ -21,9 +22,13 @@ type BluetoothDialer interface {
 	DialBluetooth(timeoutMillis int64) (BluetoothConnection, error)
 }
 
-// UseBluetooth 注册平台蓝牙拨号器，返回图库、传图和 OTA 共用的相框地址。
-func UseBluetooth(address string, dialer BluetoothDialer) string {
-	return devicehttp.UseBluetooth(address, func(ctx context.Context) (devicehttp.BluetoothLink, error) {
+// bluetoothDialer 把 Android 的 GATT 拨号器适配成会话需要的拨号函数。
+// 同一台相框掉线后的下一次请求会再次拨号。
+func bluetoothDialer(dialer BluetoothDialer) frameclient.BluetoothDialer {
+	return func(ctx context.Context) (devicehttp.BluetoothLink, error) {
+		if dialer == nil {
+			return nil, errors.New("缺少相框蓝牙拨号器")
+		}
 		timeout, err := bluetoothTimeout(ctx)
 		if err != nil {
 			return nil, err
@@ -40,12 +45,7 @@ func UseBluetooth(address string, dialer BluetoothDialer) string {
 			return nil, err
 		}
 		return bluetoothLink{connection}, nil
-	})
-}
-
-// ForgetBluetooth 关闭该地址的连接并释放平台拨号器。
-func ForgetBluetooth(host string) {
-	devicehttp.ForgetBluetooth(host)
+	}
 }
 
 type bluetoothLink struct {

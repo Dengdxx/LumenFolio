@@ -41,9 +41,9 @@ internal fun FirmwareUpgradeScreen(
     var confirming by rememberSaveable { mutableStateOf(false) }
     val selected = model.firmware
     val feedback = model.firmwareFeedback
-    val host = model.host
-    val connection = model.bluetooth?.let { "蓝牙 · ${it.name}" } ?: host
-    val canUpgrade = selected != null && host.isNotEmpty() && !model.busy
+    val connected = model.session != null
+    val connection = model.bluetooth?.let { "蓝牙 · ${it.name}" } ?: model.address.trim()
+    val canUpgrade = selected != null && connected && !model.busy
 
     Box(
         modifier = modifier.verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 20.dp),

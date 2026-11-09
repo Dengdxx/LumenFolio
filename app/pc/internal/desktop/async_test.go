@@ -236,7 +236,8 @@ func TestGalleryDeleteRequiresConfirmationAndProtectsBoot(t *testing.T) {
 	u.window = &waitingWindow{wake: make(chan struct{}, 1)}
 	g := &u.gallery
 	defer g.cancelRequest()
-	g.host, g.source, g.selected = "invalid host", gallery.Flash, "boot"
+	u.setSession(testWiFiSession(t, "invalid host"))
+	g.source, g.selected = gallery.Flash, "boot"
 	u.openGalleryDeleteConfirmation()
 	if g.confirming {
 		t.Fatal("开机画面不得进入删除确认")
@@ -265,7 +266,8 @@ func TestGalleryDeleteRefreshesOnlyAfterSuccess(t *testing.T) {
 		defer u.closeGallery()
 		g := &u.gallery
 		// 非法地址让刷新请求在发网前返回，测试只验证结果处理。
-		g.host, g.source, g.selected = "invalid host", gallery.SD, "1.bin"
+		u.setSession(testWiFiSession(t, "invalid host"))
+		g.source, g.selected = gallery.SD, "1.bin"
 		g.pictures = []gallery.Picture{{ID: "1.bin"}}
 		g.preview = paint.NewImageOp(image.NewNRGBA(image.Rect(0, 0, 3, 4)))
 		g.confirming = true

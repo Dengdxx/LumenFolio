@@ -2,6 +2,7 @@ package desktop
 
 import (
 	"context"
+	"errors"
 	"image"
 	"image/color"
 
@@ -13,10 +14,13 @@ import (
 	"gioui.org/widget"
 	"gioui.org/widget/material"
 
+	"lumenfolio/frameclient"
 	"lumenfolio/gallery"
 	"lumenfolio/identity"
-	"lumenfolio/ota"
 )
+
+// errNoSession 表示当前没有可用的相框会话。
+var errNoSession = errors.New("还没有连接相框")
 
 // galleryBrowser 的视图状态由窗口事件循环独占。后台请求只发送不可变的结果。
 type galleryBrowser struct {
@@ -34,7 +38,7 @@ type galleryBrowser struct {
 	buttons           []*widget.Clickable
 	list              layout.List
 
-	host         string
+	open         bool
 	source       gallery.Source
 	pictures     []gallery.Picture
 	pictureIndex map[string]int
@@ -80,15 +84,19 @@ type galleryResult struct {
 	storage  gallery.StorageUsage
 	status   string
 	frameID  identity.ID
+	address  string // 读取身份时的 Wi-Fi 地址；蓝牙会话为空
 }
 
 func (u *ui) openGallery() {
-	host := u.deviceHost()
-	if host == "" {
+	u.syncWiFiSession()
+	if u.session == nil {
 		u.status = "先填写相框地址"
+		if u.wifiError != "" {
+			u.status = "相框地址无效：" + u.wifiError
+		}
 		return
 	}
-	u.gallery.host = host
+	u.gallery.open = true
 	u.loadGallery(gallery.Flash)
 	u.loadGalleryInfo()
 	u.window.Invalidate()
@@ -98,7 +106,7 @@ func (u *ui) closeGallery() {
 	g := &u.gallery
 	g.cancelRequest()
 	g.cancelInfoRequest()
-	g.host = ""
+	g.open = false
 	g.pictures = nil
 	g.pictureIndex = nil
 	g.nextPage, g.pageErr = "", nil
@@ -124,12 +132,15 @@ func (u *ui) loadGallery(source gallery.Source) {
 	u.readGalleryPage("")
 }
 
-// readGalleryPage 把游标和来源固定到本次请求。切换来源或刷新时由新请求取消旧结果。
+// readGalleryPage 把游标、来源和会话固定到本次请求。切换来源或刷新时由新请求取消旧结果。
 func (u *ui) readGalleryPage(after string) {
 	g := &u.gallery
-	host, source := g.host, g.source
+	session, source := u.session, g.source
 	u.startGalleryRequest(func(ctx context.Context) galleryResult {
-		page, err := gallery.ListPage(ctx, host, 8080, source, after)
+		if session == nil {
+			return galleryResult{err: errNoSession}
+		}
+		page, err := session.Pictures(ctx, source, after)
 		return galleryResult{pictures: page.Pictures, next: page.Next, err: err}
 	})
 	if after != "" {
@@ -143,9 +154,12 @@ func (u *ui) loadGalleryPreview(id string) {
 	g.selected = id
 	g.preview, g.err = paint.ImageOp{}, nil
 	g.actionStatus, g.actionError, g.confirming = "", false, false
-	host, source := g.host, g.source
+	session, source := u.session, g.source
 	u.startGalleryRequest(func(ctx context.Context) galleryResult {
-		img, err := gallery.Preview(ctx, host, 8080, source, id)
+		if session == nil {
+			return galleryResult{err: errNoSession}
+		}
+		img, err := session.Preview(ctx, source, id)
 		if err != nil {
 			return galleryResult{err: err}
 		}
@@ -197,9 +211,12 @@ func (g *galleryBrowser) firstMissingThumbnail(first, end int) int {
 
 func (u *ui) loadGalleryThumbnail(index int) {
 	g := &u.gallery
-	host, source, picture := g.host, g.source, g.pictures[index]
+	session, source, picture := u.session, g.source, g.pictures[index]
 	u.startGalleryRequest(func(ctx context.Context) galleryResult {
-		pixels, err := gallery.ThumbnailFor(ctx, host, 8080, source, picture)
+		if session == nil {
+			return galleryResult{id: picture.ID, err: errNoSession}
+		}
+		pixels, err := session.Thumbnail(ctx, source, picture)
 		if err != nil {
 			return galleryResult{id: picture.ID, err: err}
 		}
@@ -213,10 +230,13 @@ func (u *ui) displayGalleryPicture() {
 	if g.selected == "" || g.preview.Size().X == 0 || g.actionPending() || g.confirming {
 		return
 	}
-	host, source, id := g.host, g.source, g.selected
+	session, source, id := u.session, g.source, g.selected
 	g.actionStatus, g.actionError = "正在安排显示…", false
 	u.startGalleryRequest(func(ctx context.Context) galleryResult {
-		return galleryResult{err: gallery.Display(ctx, host, 8080, source, id)}
+		if session == nil {
+			return galleryResult{err: errNoSession}
+		}
+		return galleryResult{err: session.Display(ctx, source, id)}
 	})
 	g.kind = galleryDisplay
 	u.window.Invalidate()
@@ -228,7 +248,7 @@ func (g *galleryBrowser) actionPending() bool {
 
 func (u *ui) openGalleryDeleteConfirmation() {
 	g := &u.gallery
-	if !gallery.CanDelete(g.source, g.selected) || g.actionPending() || (g.request != nil && g.kind == galleryRead) {
+	if !frameclient.CanDelete(g.source, g.selected) || g.actionPending() || (g.request != nil && g.kind == galleryRead) {
 		return
 	}
 	g.confirming = true
@@ -239,13 +259,16 @@ func (u *ui) openGalleryDeleteConfirmation() {
 // deleteGalleryPicture 只提交已确认的来源与文件名，等待回执期间固定当前选择。
 func (u *ui) deleteGalleryPicture() {
 	g := &u.gallery
-	if !g.confirming || g.actionPending() || !gallery.CanDelete(g.source, g.selected) {
+	if !g.confirming || g.actionPending() || !frameclient.CanDelete(g.source, g.selected) {
 		return
 	}
-	host, source, id := g.host, g.source, g.selected
+	session, source, id := u.session, g.source, g.selected
 	g.actionStatus, g.actionError = "正在删除…", false
 	u.startGalleryRequest(func(ctx context.Context) galleryResult {
-		return galleryResult{err: gallery.Delete(ctx, host, 8080, source, id)}
+		if session == nil {
+			return galleryResult{err: errNoSession}
+		}
+		return galleryResult{err: session.Delete(ctx, source, id)}
 	})
 	g.kind = galleryDelete
 	u.window.Invalidate()
@@ -257,16 +280,19 @@ func (u *ui) loadGalleryInfo() {
 	g.cancelInfoRequest()
 	ctx, cancel := context.WithCancel(context.Background())
 	g.infoRequest, g.cancelInfo = ctx, cancel
-	host := g.host
+	session, address := u.session, u.rememberAddress()
 	u.runGalleryRequest(ctx, func(ctx context.Context) galleryResult {
-		usage, storageErr := gallery.Storage(ctx, host, 8080)
-		status, _ := ota.DeviceStatus(ctx, host, 8080)
+		if session == nil {
+			return galleryResult{err: errNoSession}
+		}
+		usage, storageErr := session.Storage(ctx)
+		status, _ := session.Status(ctx)
 		var id identity.ID
 		var identityErr error
 		if storageErr == nil {
-			id, identityErr = u.identifyWiFi(ctx, host)
+			id, identityErr = u.identifySession(ctx, session)
 		}
-		return galleryResult{storage: usage, status: status, frameID: id, err: identityErr}
+		return galleryResult{storage: usage, status: status, frameID: id, address: address, err: identityErr}
 	})
 }
 
@@ -398,8 +424,12 @@ func (u *ui) galleryLayout(gtx layout.Context) layout.Dimensions {
 
 func (u *ui) galleryHeader(gtx layout.Context) layout.Dimensions {
 	g := &u.gallery
-	title := material.Subtitle1(u.theme, "相框图片 · "+u.deviceLabel(g.host))
-	title.MaxLines = 1
+	title := "相框图片"
+	if label := u.deviceLabel(); label != "" {
+		title += " · " + label
+	}
+	subtitle := material.Subtitle1(u.theme, title)
+	subtitle.MaxLines = 1
 	flashUsage, sdUsage := g.storage.Flash.String(), g.storage.SD.String()
 	status := g.deviceStatus
 	if g.infoRequest != nil {
@@ -415,7 +445,7 @@ func (u *ui) galleryHeader(gtx layout.Context) layout.Dimensions {
 			layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
 				moveArea(gtx, image.Pt(gtx.Constraints.Max.X, gtx.Dp(54)))
 				return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
-					layout.Rigid(title.Layout),
+					layout.Rigid(subtitle.Layout),
 					layout.Rigid(gap(4)),
 					layout.Rigid(u.section(status)),
 				)
@@ -530,7 +560,7 @@ func (u *ui) galleryThumbnail(gtx layout.Context, thumbnail paint.ImageOp, loade
 func (u *ui) galleryPreview(gtx layout.Context) layout.Dimensions {
 	g := &u.gallery
 	return layout.UniformInset(unit.Dp(24)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-		if g.preview.Size().X > 0 || gallery.CanDelete(g.source, g.selected) {
+		if g.preview.Size().X > 0 || frameclient.CanDelete(g.source, g.selected) {
 			return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
 				layout.Flexed(1, u.galleryPicture),
 				layout.Rigid(gap(12)),
@@ -599,7 +629,7 @@ func (u *ui) galleryControls(gtx layout.Context) layout.Dimensions {
 func (u *ui) galleryActionButtons(gtx layout.Context) layout.Dimensions {
 	g := &u.gallery
 	display := u.primaryButton("在相框上显示", &g.displayButton, u.displayGalleryPicture)
-	if !gallery.CanDelete(g.source, g.selected) {
+	if !frameclient.CanDelete(g.source, g.selected) {
 		return display(gtx)
 	}
 	deleteButton := u.button("删除图片", &g.deleteButton, u.openGalleryDeleteConfirmation)

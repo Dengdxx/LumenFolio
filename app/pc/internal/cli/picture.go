@@ -9,8 +9,11 @@ import (
 	_ "image/jpeg"
 	_ "image/png"
 	"io"
+	"net"
 	"os"
+	"strconv"
 
+	"lumenfolio/frameclient"
 	"lumenfolio/internal/picture"
 	"lumenfolio/panel"
 )
@@ -19,6 +22,7 @@ import (
 //
 // 位置参数是图片路径。--http-port 默认 8080，--alg 是抖动算法序号，默认 Floyd-Steinberg。
 // 取景用 panel.NewCrop 的初始构图：整图等比放进面板、居中、不旋转。
+// 整次上传只打开一次 Wi-Fi 会话，结束后关闭。
 func runFrame(ctx context.Context, host string, args []string, out, errOut io.Writer) int {
 	flags := flag.NewFlagSet("frame", flag.ContinueOnError)
 	flags.SetOutput(errOut)
@@ -45,7 +49,13 @@ func runFrame(ctx context.Context, host string, args []string, out, errOut io.Wr
 		fmt.Fprintln(errOut, err)
 		return 1
 	}
-	reply, err := picture.Send(ctx, host, *port, *alg, src, panel.NewCrop(src.Bounds()))
+	session, err := frameclient.WiFi(net.JoinHostPort(host, strconv.Itoa(*port)))
+	if err != nil {
+		fmt.Fprintln(errOut, err)
+		return 1
+	}
+	defer session.Close()
+	reply, err := picture.Send(ctx, session, *alg, src, panel.NewCrop(src.Bounds()))
 	if err != nil {
 		fmt.Fprintln(errOut, err)
 		return 1

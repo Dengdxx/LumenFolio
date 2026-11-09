@@ -71,13 +71,22 @@ func TestFrameCommandPostsCurrentPicture(t *testing.T) {
 	}
 	var got []byte
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/frame/transfer" {
+			t.Errorf("请求路径错误：%s", r.URL.Path)
+		}
+		if r.Method == http.MethodGet {
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(`{"stage":"done"}`))
+			return
+		}
 		body, err := io.ReadAll(r.Body)
 		if err != nil {
 			t.Error(err)
 		}
 		got = body
+		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusAccepted)
-		w.Write([]byte("已写入，正在刷上屏\n"))
+		w.Write([]byte(`{"id":1}`))
 	}))
 	defer server.Close()
 	host, portText, err := net.SplitHostPort(strings.TrimPrefix(server.URL, "http://"))

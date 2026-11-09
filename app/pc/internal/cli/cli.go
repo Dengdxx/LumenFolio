@@ -7,8 +7,6 @@ import (
 	"flag"
 	"fmt"
 	"io"
-
-	"lumenfolio/ota"
 )
 
 // Run 解析命令行并返回进程退出码。
@@ -49,5 +47,5 @@ func Run(ctx context.Context, args []string, out, errOut io.Writer) int {
 	if global.Arg(0) == "frame" {
 		return runFrame(ctx, *host, global.Args()[1:], out, errOut)
 	}
-	return ota.Run(ctx, *host, global.Args()[1:], out, errOut)
+	return runOTA(ctx, *host, global.Args()[1:], out, errOut)
 }

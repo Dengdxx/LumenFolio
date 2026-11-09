@@ -326,6 +326,19 @@ func uploadOTA(ctx context.Context, client *http.Client, base string, source io.
 	return status, !definiteRejection && err != nil, err
 }
 
+// UpgradeWithin 与 Upgrade 相同，但由调用方指定上传和等待重启的时限。
+// 两个时限都必须大于零，否则返回错误。
+func UpgradeWithin(ctx context.Context, host string, port int, source io.ReaderAt, size int64, uploadTimeout, waitTimeout time.Duration, report func(Progress)) error {
+	if uploadTimeout <= 0 || waitTimeout <= 0 {
+		return errors.New("升级时限无效")
+	}
+	host = strings.TrimSpace(host)
+	if host == "" || port < 1 || port > 65535 {
+		return errors.New("相框地址或 OTA 端口无效")
+	}
+	return upgrade(ctx, host, port, source, size, uploadTimeout, waitTimeout, report)
+}
+
 // Upgrade 读取本地应用镜像，完成上传、重启核对和确认。设备确认了目标镜像后才返回成功。
 // report 可省略。回调串行执行，可能由 HTTP goroutine 调用，Upgrade 返回后不再调用。
 // 调用方须在 Upgrade 期间保持镜像数据可读且不变。取消 ctx 会停止本次客户端请求。
