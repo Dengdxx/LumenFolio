@@ -71,6 +71,8 @@ I (…) wifi: 已连上 smd，IP 192.168.137.42，网关 192.168.137.1，OTA 端
 
 准备可信来源的 Release `LumenFolio.bin` 应用镜像。自行构建时使用 `build/release/LumenFolio.bin`。
 
+仓库的 [构建与发布流程](../.github/workflows/build.yml) 会验证 Windows、Android 和固件构建。推送 `v` 开头的版本标签后，GitHub Release 会提供可用于 OTA 的 `LumenFolio.bin` 和 Windows EXE。随附的 ARM64 Android APK 是未签名构建，安装前需按 Android 发布流程签名。
+
 ### 通过配套 App 升级
 
 让 Windows 或 Android 设备与相框处于同一可信局域网，唤醒相框并填写其地址。打开「固件升级」，选择本地的 Release `LumenFolio.bin`，核对文件版本和目标地址后确认升级。App 会上传镜像，等待相框重启，再核对并确认目标镜像。等到 App 提示升级成功再退出，期间保持相框供电并避免操作刷屏。

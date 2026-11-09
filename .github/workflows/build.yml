@@ -1,0 +1,106 @@
+name: Build and release
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+jobs:
+  firmware:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - uses: espressif/esp-idf-ci-action@v1
+        with:
+          esp_idf_version: v6.1
+          target: esp32s3
+          command: idf.py --preset release build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: firmware
+          path: build/release/LumenFolio.bin
+          if-no-files-found: error
+
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: app/pc/go.mod
+          cache-dependency-path: app/pc/go.sum
+      - run: |
+          go test -p=1 ./...
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          go vet -p=1 ./...
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          go build -o LumenFolio.exe .
+        working-directory: app/pc
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: app/pc/LumenFolio.exe
+          if-no-files-found: error
+
+  android:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: app/android/mobilepanel/go.mod
+          cache-dependency-path: |
+            app/android/mobilepanel/go.sum
+            app/pc/go.sum
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.13'
+      - name: Install Android SDK and NDK
+        run: |
+          sdkmanager --licenses < <(yes) > /dev/null
+          sdkmanager --install 'platforms;android-36' 'build-tools;36.0.0' 'ndk;28.2.13676358'
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/28.2.13676358" >> "$GITHUB_ENV"
+      - name: Install Go binding tools
+        working-directory: app/android/mobilepanel
+        run: |
+          go test ./...
+          GOBIN="$RUNNER_TEMP/lumenfolio-bin" go install tool
+          echo "$RUNNER_TEMP/lumenfolio-bin" >> "$GITHUB_PATH"
+      - name: Build ARM64 APK
+        run: |
+          gradle --no-daemon -p app/android :app:assembleRelease
+          cp app/android/app/build/outputs/apk/release/app-release-unsigned.apk LumenFolio-Android-arm64-unsigned.apk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android
+          path: LumenFolio-Android-arm64-unsigned.apk
+          if-no-files-found: error
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [firmware, windows, android]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: release
+          merge-multiple: true
+      - name: Publish tagged release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          gh release create "$GITHUB_REF_NAME" release/LumenFolio.bin release/LumenFolio.exe
+          release/LumenFolio-Android-arm64-unsigned.apk
+          --repo "$GITHUB_REPOSITORY" --verify-tag --generate-notes

@@ -77,6 +77,8 @@ func TestSendPostsRawAndCompressedFrames(t *testing.T) {
 
 func TestSendReportsRejectionAndCancellation(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// 收完请求体再拒绝，Windows 才能收到错误响应而非未读请求体导致的 TCP 重置。
+		io.Copy(io.Discard, r.Body)
 		http.Error(w, "帧格式不支持", http.StatusUnprocessableEntity)
 	}))
 	defer server.Close()
