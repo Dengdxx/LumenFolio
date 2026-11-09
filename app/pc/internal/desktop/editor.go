@@ -3,6 +3,7 @@ package desktop
 import (
 	"image"
 
+	"gioui.org/io/semantic"
 	"gioui.org/layout"
 	"gioui.org/op"
 	"gioui.org/op/clip"
@@ -79,12 +80,21 @@ func (u *ui) heading(gtx layout.Context) layout.Dimensions {
 		layout.Rigid(gap(10)),
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
-				layout.Rigid(material.H6(u.theme, "LumenFolio").Layout),
+				layout.Rigid(u.wordmarkLabel),
 				layout.Rigid(gap(2)),
 				layout.Rigid(u.section("1200×1600 · 六色")),
 			)
 		}),
 	)
+}
+
+func (u *ui) wordmarkLabel(gtx layout.Context) layout.Dimensions {
+	size := gtx.Constraints.Constrain(image.Pt(gtx.Dp(126), gtx.Dp(24)))
+	gtx.Constraints = layout.Exact(size)
+	defer clip.Rect{Max: size}.Push(gtx.Ops).Pop()
+	semantic.LabelOp("LumenFolio").Add(gtx.Ops)
+	wordmark := widget.Image{Src: u.wordmark, Fit: widget.Contain, Position: layout.W}
+	return wordmark.Layout(gtx)
 }
 
 func (u *ui) cropControls(gtx layout.Context) layout.Dimensions {

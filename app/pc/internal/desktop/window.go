@@ -64,6 +64,7 @@ type windowInvalidator interface {
 type ui struct {
 	theme       *material.Theme
 	colors      appColors
+	wordmark    paint.ImageOp
 	explorer    *explorer.Explorer
 	window      windowInvalidator
 	initialFile string
@@ -126,6 +127,7 @@ func newUI(shaper *text.Shaper, initialFile string) *ui {
 	ui := &ui{
 		theme:       theme,
 		colors:      colors,
+		wordmark:    tintBrandWordmark(colors.text),
 		initialFile: initialFile,
 		algButtons:  make([]widget.Clickable, len(panel.Algorithms())),
 		algList:     layout.List{Axis: layout.Vertical},

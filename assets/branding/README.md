@@ -15,6 +15,7 @@
 - `lumen-folio-icon.svg`：独立方形图标，透明背景。
 - `lumen-folio-icon.png`：512 × 512 透明背景 PNG。
 - `lumen-folio-logo-preview.svg` 从宽版绘制，叠加浅底供项目首页使用。
+- `lumen-folio-wordmark.svg` 和透明 PNG 从宽版提取完整艺术字，供 Windows 和 Android 的应用标题使用。两端按当前主题着色。
 
 ## 色值
 
@@ -43,3 +44,10 @@ Copy-Item -LiteralPath assets/branding/lumen-folio-icon.png -Destination app/and
 ```
 
 Windows 生成器也会编译 `app/pc/branding/LumenFolio.manifest`。修改清单后用同一命令重新生成 Windows 资源。
+
+更新字标时，将从宽版 SVG 提取的字标渲染为透明 PNG，再复制给两个应用。
+
+```powershell
+Copy-Item -LiteralPath assets/branding/lumen-folio-wordmark.png -Destination app/pc/internal/desktop/lumen-folio-wordmark.png
+Copy-Item -LiteralPath assets/branding/lumen-folio-wordmark.png -Destination app/android/app/src/main/res/drawable-nodpi/lumenfolio_wordmark.png
+```

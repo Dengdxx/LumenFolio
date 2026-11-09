@@ -5,6 +5,7 @@ import (
 	_ "embed"
 	"image"
 	"image/color"
+	"image/draw"
 	"image/png"
 	"sync"
 
@@ -24,6 +25,24 @@ var brandIcon = sync.OnceValue(func() paint.ImageOp {
 	}
 	return paint.NewImageOp(icon)
 })
+
+//go:embed lumen-folio-wordmark.png
+var brandWordmarkPNG []byte
+
+var brandWordmark = sync.OnceValue(func() image.Image {
+	wordmark, err := png.Decode(bytes.NewReader(brandWordmarkPNG))
+	if err != nil {
+		panic(err)
+	}
+	return wordmark
+})
+
+func tintBrandWordmark(foreground color.NRGBA) paint.ImageOp {
+	mask := brandWordmark()
+	tinted := image.NewRGBA(mask.Bounds())
+	draw.DrawMask(tinted, tinted.Bounds(), image.NewUniform(foreground), image.Point{}, mask, mask.Bounds().Min, draw.Src)
+	return paint.NewImageOp(tinted)
+}
 
 type appColors struct {
 	background, surface, field   color.NRGBA

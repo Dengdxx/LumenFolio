@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.only
@@ -55,6 +56,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.res.colorResource
 import androidx.compose.ui.res.painterResource
@@ -154,7 +157,14 @@ private fun LumenFolioTopBar(showingDevicePage: Boolean, enabled: Boolean, onSwi
                         .background(colorResource(R.color.lumenfolio_icon_background), ControlShape)
                         .padding(3.dp),
                 )
-                Text("LumenFolio", Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
+                Image(
+                    painter = painterResource(R.drawable.lumenfolio_wordmark),
+                    contentDescription = "LumenFolio",
+                    modifier = Modifier.weight(1f).height(24.dp),
+                    alignment = Alignment.CenterStart,
+                    contentScale = ContentScale.Fit,
+                    colorFilter = ColorFilter.tint(colors.onSurface),
+                )
                 TextButton(onClick = onSwitch, enabled = enabled) {
                     Text(if (showingDevicePage) "返回取景" else "相框图片")
                 }
