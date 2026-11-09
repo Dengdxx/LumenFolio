@@ -7,7 +7,7 @@
 | `firmware-v0.1.0` | 固件 v0.1.0 | `LumenFolio.bin` |
 | `app-v0.1.0` | 配套 App v0.1.0 | `LumenFolio-Windows-x64-Setup.exe`、`LumenFolio-Android-arm64.apk` |
 
-在要发布的提交上打对应标签并推送。两个版本号可以独立递增。固件 Release 用作仓库的 Latest 入口，配套 App 从 Releases 列表按 `app-v` 标签查找。
+在要发布的提交上打带注释的标签并推送。标签注释会成为 Release 说明，可将对应产品的提交标题整理进注释作为更新日志。两个版本号可以独立递增。固件 Release 用作仓库的 Latest 入口，配套 App 从 Releases 列表按 `app-v` 标签查找。
 
 ## 配套 App
 

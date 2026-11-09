@@ -17,11 +17,23 @@ jobs:
       - uses: actions/checkout@v6
         with:
           fetch-depth: 0
+      - id: firmware-version
+        shell: bash
+        run: |
+          version="${GITHUB_SHA:0:7}"
+          if [[ "$GITHUB_REF" == refs/tags/firmware-v* ]]; then
+            version="${GITHUB_REF_NAME#firmware-}"
+            if [[ ! "$version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || (( ${#version} > 31 )); then
+              echo 'Firmware version must have the form firmware-vMAJOR.MINOR.PATCH' >&2
+              exit 1
+            fi
+          fi
+          printf 'version=%s\n' "$version" >> "$GITHUB_OUTPUT"
       - uses: espressif/esp-idf-ci-action@v1
         with:
           esp_idf_version: v6.1
           target: esp32s3
-          command: idf.py --preset release build
+          command: idf.py --preset release -D PROJECT_VER=${{ steps.firmware-version.outputs.version }} build
       - uses: actions/upload-artifact@v7
         with:
           name: firmware
@@ -145,6 +157,10 @@ jobs:
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
       - uses: actions/download-artifact@v8
         with:
           name: firmware
@@ -154,8 +170,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release create "$GITHUB_REF_NAME" release/LumenFolio.bin \
-            --repo "$GITHUB_REPOSITORY" --verify-tag --latest \
-            --title "固件 ${GITHUB_REF_NAME#firmware-}" --notes 'ESP32-S3 Release 固件。下载 LumenFolio.bin 后可通过配套 App 或命令行执行局域网 OTA。'
+            --verify-tag --latest --notes-from-tag \
+            --title "固件 ${GITHUB_REF_NAME#firmware-}"
 
   release-app:
     if: startsWith(github.ref, 'refs/tags/app-v')
@@ -164,6 +180,10 @@ jobs:
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
       - uses: actions/download-artifact@v8
         with:
           pattern: 'app-*'
@@ -174,5 +194,5 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release create "$GITHUB_REF_NAME" release/LumenFolio-Windows-x64-Setup.exe release/LumenFolio-Android-arm64.apk \
-            --repo "$GITHUB_REPOSITORY" --verify-tag --latest=false \
-            --title "配套 App ${GITHUB_REF_NAME#app-}" --notes '配套应用 Release。Windows 提供 x64 安装程序，Android 提供已签名的 ARM64 APK。'
+            --verify-tag --latest=false --notes-from-tag \
+            --title "配套 App ${GITHUB_REF_NAME#app-}"
