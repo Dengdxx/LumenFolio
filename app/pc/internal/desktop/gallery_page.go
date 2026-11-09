@@ -394,11 +394,12 @@ func (u *ui) galleryHeader(gtx layout.Context) layout.Dimensions {
 	} else if status == "" {
 		status = "设备状态不可用"
 	}
-	return layout.UniformInset(unit.Dp(12)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+	return (layout.Inset{Top: 12, Bottom: 12, Left: 12, Right: 150}).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 		return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
 			layout.Rigid(u.tabButton("← 返回", &g.closeButton, false, u.closeGallery)),
 			layout.Rigid(gap(12)),
 			layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+				moveArea(gtx, image.Pt(gtx.Constraints.Max.X, gtx.Dp(54)))
 				return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
 					layout.Rigid(title.Layout),
 					layout.Rigid(gap(4)),

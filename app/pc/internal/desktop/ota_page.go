@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"image"
 	"io"
 	"path/filepath"
 	"strings"
@@ -142,6 +143,7 @@ func (u *ui) postOTA(update otaUpdate) {
 
 func (u *ui) otaLayout(gtx layout.Context) layout.Dimensions {
 	p := &u.ota
+	moveArea(gtx, image.Pt(gtx.Dp(140), gtx.Dp(44)))
 	return layout.N.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 		gtx.Constraints.Max.X = min(gtx.Constraints.Max.X, gtx.Dp(unit.Dp(560)))
 		return u.card(gtx, func(gtx layout.Context) layout.Dimensions {

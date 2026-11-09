@@ -30,7 +30,7 @@ func Run(initialFile string) int {
 	ui := newUI(shaper, initialFile)
 	go func() {
 		w := new(app.Window)
-		w.Option(app.Title("LumenFolio"), app.Size(unit.Dp(1180), unit.Dp(760)), app.MinSize(unit.Dp(900), unit.Dp(600)))
+		w.Option(app.Title("LumenFolio"), app.Decorated(false), app.Size(unit.Dp(1180), unit.Dp(760)), app.MinSize(unit.Dp(900), unit.Dp(600)))
 		if err := ui.run(w); err != nil {
 			log.Fatal(err)
 		}
@@ -67,6 +67,11 @@ type ui struct {
 	wordmark    paint.ImageOp
 	explorer    *explorer.Explorer
 	window      windowInvalidator
+	appWindow   *app.Window
+	windowMode  app.WindowMode
+	minimizeBtn widget.Clickable
+	maximizeBtn widget.Clickable
+	closeBtn    widget.Clickable
 	initialFile string
 
 	// 按钮
@@ -152,6 +157,7 @@ func (u *ui) run(w *app.Window) error {
 	defer u.closeGallery()
 	defer u.upload.close()
 	u.window = w
+	u.appWindow = w
 	u.explorer = explorer.NewExplorer(w)
 	if u.initialFile != "" {
 		u.fileBusy = true
@@ -175,6 +181,8 @@ func (u *ui) run(w *app.Window) error {
 		switch evt := evt.(type) {
 		case app.DestroyEvent:
 			return evt.Err
+		case app.ConfigEvent:
+			u.windowMode = evt.Config.Mode
 		case app.FrameEvent:
 			// 文件选择可能在等待这个鼠标帧时结束，先应用结果再派发点击。
 			u.applyPendingResults()

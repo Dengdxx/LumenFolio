@@ -51,7 +51,7 @@ func (u *ui) canvasHeader(gtx layout.Context) layout.Dimensions {
 	if u.rawImage == nil {
 		return layout.Dimensions{}
 	}
-	return layout.Inset{Top: unit.Dp(6), Bottom: unit.Dp(6), Left: unit.Dp(16), Right: unit.Dp(16)}.Layout(gtx,
+	return layout.Inset{Top: unit.Dp(6), Bottom: unit.Dp(6), Left: unit.Dp(16), Right: unit.Dp(150)}.Layout(gtx,
 		func(gtx layout.Context) layout.Dimensions {
 			return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
 				layout.Rigid(u.tabButton("取景选取", &u.modeCropBtn, u.mode == modeCrop, func() {

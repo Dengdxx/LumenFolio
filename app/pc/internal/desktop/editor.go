@@ -17,6 +17,16 @@ import (
 
 func (u *ui) layout(gtx layout.Context) layout.Dimensions {
 	paint.Fill(gtx.Ops, u.colors.background)
+	return layout.Stack{Alignment: layout.NE}.Layout(gtx,
+		layout.Expanded(func(gtx layout.Context) layout.Dimensions {
+			gtx.Constraints.Min = gtx.Constraints.Max
+			return u.pageLayout(gtx)
+		}),
+		layout.Stacked(u.windowControls),
+	)
+}
+
+func (u *ui) pageLayout(gtx layout.Context) layout.Dimensions {
 	if u.gallery.host != "" {
 		return u.galleryLayout(gtx)
 	}
@@ -69,6 +79,7 @@ func (u *ui) sidebar(gtx layout.Context) layout.Dimensions {
 }
 
 func (u *ui) heading(gtx layout.Context) layout.Dimensions {
+	moveArea(gtx, image.Pt(gtx.Constraints.Max.X, gtx.Dp(48)))
 	return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			size := image.Pt(gtx.Dp(26), gtx.Dp(26))
