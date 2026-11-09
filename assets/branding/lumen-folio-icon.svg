@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" fill="none" role="img" aria-label="Lumen Folio icon">
+  <defs>
+    <clipPath id="icon-frame-clip"><rect x="104" y="44" width="304" height="404" rx="30"/></clipPath>
+    <clipPath id="icon-ribbon-clip"><rect x="136.00" y="356.00" width="240.00" height="14.00" rx="7.00"/></clipPath>
+  </defs>
+  <rect x="104" y="44" width="304" height="404" rx="30" fill="#F7F3EA"/>
+  <rect x="76" y="16" width="360" height="480" rx="44" stroke="#171B21" stroke-width="28"/>
+  <g clip-path="url(#icon-frame-clip)">
+    <path d="M326 44H408V126Z" fill="#171B21"/>
+    <path d="M326 44L408 126H326Z" fill="#EDE6D8"/>
+    <path d="M326 44L408 126" stroke="#CFC6B5" stroke-width="2"/>
+    <path d="M178.00 124.00Q184.12 151.88 212.00 158.00Q184.12 164.12 178.00 192.00Q171.88 164.12 144.00 158.00Q171.88 151.88 178.00 124.00Z" fill="#DDA63A"/>
+    <g clip-path="url(#icon-ribbon-clip)"><rect x="136.00" y="356.00" width="40.00" height="14.00" fill="#CF493F"/><rect x="176.00" y="356.00" width="40.00" height="14.00" fill="#E37A43"/><rect x="216.00" y="356.00" width="40.00" height="14.00" fill="#DDA63A"/><rect x="256.00" y="356.00" width="40.00" height="14.00" fill="#3B8A6B"/><rect x="296.00" y="356.00" width="40.00" height="14.00" fill="#346FA8"/><rect x="336.00" y="356.00" width="40.00" height="14.00" fill="#171B21"/></g><rect x="136.00" y="356.00" width="240.00" height="14.00" rx="7.00" stroke="#171B21" stroke-opacity="0.10" stroke-width="2"/>
+  </g>
+</svg>

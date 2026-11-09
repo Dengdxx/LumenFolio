@@ -379,15 +379,10 @@ func (u *ui) heading(gtx layout.Context) layout.Dimensions {
 	return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			size := image.Pt(gtx.Dp(26), gtx.Dp(26))
-			tint := u.colors.primary
-			tint.A = 38
-			roundedSurface(gtx, size, 8, tint, color.NRGBA{})
+			roundedSurface(gtx, size, 8, argb(0xFFF7F3EA), u.colors.outline)
 			gtx.Constraints = layout.Exact(size)
-			return layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-				frame := image.Pt(gtx.Dp(11), gtx.Dp(14))
-				strokeRounded(gtx, frame, 2, u.colors.primary)
-				return layout.Dimensions{Size: frame}
-			})
+			icon := widget.Image{Src: brandIcon(), Fit: widget.Contain, Position: layout.Center}
+			return layout.UniformInset(2).Layout(gtx, icon.Layout)
 		}),
 		layout.Rigid(gap(10)),
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {

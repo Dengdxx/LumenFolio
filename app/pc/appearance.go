@@ -1,14 +1,29 @@
 package main
 
 import (
+	"bytes"
+	_ "embed"
 	"image"
 	"image/color"
+	"image/png"
+	"sync"
 
 	"gioui.org/layout"
 	"gioui.org/op/clip"
 	"gioui.org/op/paint"
 	"gioui.org/unit"
 )
+
+//go:embed branding/lumen-folio-icon.png
+var brandIconPNG []byte
+
+var brandIcon = sync.OnceValue(func() paint.ImageOp {
+	icon, err := png.Decode(bytes.NewReader(brandIconPNG))
+	if err != nil {
+		panic(err)
+	}
+	return paint.NewImageOp(icon)
+})
 
 type appColors struct {
 	background, surface, field   color.NRGBA

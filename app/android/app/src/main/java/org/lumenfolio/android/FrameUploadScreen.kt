@@ -4,6 +4,7 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.horizontalScroll
@@ -55,6 +56,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.res.colorResource
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
@@ -143,14 +146,14 @@ private fun LumenFolioTopBar(showingDevicePage: Boolean, enabled: Boolean, onSwi
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Box(
+                Image(
+                    painter = painterResource(R.drawable.lumenfolio_icon),
+                    contentDescription = null,
                     modifier = Modifier
-                        .size(26.dp)
-                        .background(colors.primary.copy(alpha = 0.15f), ControlShape),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Box(Modifier.size(11.dp, 14.dp).border(1.5.dp, colors.primary, RoundedCornerShape(2.dp)))
-                }
+                        .size(30.dp)
+                        .background(colorResource(R.color.lumenfolio_icon_background), ControlShape)
+                        .padding(3.dp),
+                )
                 Text("LumenFolio", Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
                 TextButton(onClick = onSwitch, enabled = enabled) {
                     Text(if (showingDevicePage) "返回取景" else "相框图片")
