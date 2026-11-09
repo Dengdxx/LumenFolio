@@ -14,8 +14,8 @@ android {
         applicationId = "org.lumenfolio.android"
         minSdk = 26
         targetSdk = 36
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = providers.gradleProperty("lumenfolioVersionCode").map { it.toInt() }.getOrElse(1)
+        versionName = providers.gradleProperty("lumenfolioVersionName").getOrElse("0.1.0")
     }
 
     buildTypes {

@@ -71,7 +71,7 @@ I (…) wifi: 已连上 smd，IP 192.168.137.42，网关 192.168.137.1，OTA 端
 
 准备可信来源的 Release `LumenFolio.bin` 应用镜像。自行构建时使用 `build/release/LumenFolio.bin`。
 
-仓库的 [构建与发布流程](../.github/workflows/build.yml) 会验证 Windows、Android 和固件构建。推送 `v` 开头的版本标签后，GitHub Release 会提供可用于 OTA 的 `LumenFolio.bin` 和 Windows EXE。随附的 ARM64 Android APK 是未签名构建，安装前需按 Android 发布流程签名。
+推送 `firmware-v` 开头的版本标签后，「固件」Release 会提供可用于 OTA 的 `LumenFolio.bin`。配套应用通过独立的 `app-v` 标签发布。详见 [构建与发布](release.md)。
 
 ### 通过配套 App 升级
 

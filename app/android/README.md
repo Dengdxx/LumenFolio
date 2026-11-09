@@ -64,7 +64,7 @@ gradle -p app/android :app:assembleDebug
 gradle -p app/android :app:assembleRelease
 ```
 
-Release 通过 Gradle 的 `bindReleaseMobilePanel` 任务自动生成 `arm64-v8a` 绑定。Go 链接使用 `-s -w` 省略符号表和调试信息，APK 内的原生库启用压缩。默认产物为 `app/android/app/build/outputs/apk/release/app-release-unsigned.apk`，安装或分发前按发布流程单独签名。
+Release 通过 Gradle 的 `bindReleaseMobilePanel` 任务自动生成 `arm64-v8a` 绑定。Go 链接使用 `-s -w` 省略符号表和调试信息，APK 内的原生库启用压缩。默认产物为 `app/android/app/build/outputs/apk/release/app-release-unsigned.apk`。配套 App Release 提供已签名的 `LumenFolio-Android-arm64.apk`，详见 [构建与发布](../../docs/release.md)。
 
 ## 易错点（务必遵守）
 
