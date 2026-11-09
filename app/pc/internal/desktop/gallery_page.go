@@ -4,7 +4,6 @@ import (
 	"context"
 	"image"
 	"image/color"
-	"strings"
 
 	"gioui.org/layout"
 	"gioui.org/op/clip"
@@ -82,7 +81,7 @@ type galleryResult struct {
 }
 
 func (u *ui) openGallery() {
-	host := strings.TrimSpace(u.hostEditor.Text())
+	host := u.deviceHost()
 	if host == "" {
 		u.status = "先填写相框地址"
 		return
@@ -384,7 +383,7 @@ func (u *ui) galleryLayout(gtx layout.Context) layout.Dimensions {
 
 func (u *ui) galleryHeader(gtx layout.Context) layout.Dimensions {
 	g := &u.gallery
-	title := material.Subtitle1(u.theme, "相框图片 · "+g.host)
+	title := material.Subtitle1(u.theme, "相框图片 · "+u.deviceLabel(g.host))
 	title.MaxLines = 1
 	flashUsage, sdUsage := g.storage.Flash.String(), g.storage.SD.String()
 	status := g.deviceStatus

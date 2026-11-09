@@ -2,6 +2,7 @@
 
 #include <cstring>
 
+#include "esp_check.h"
 #include "esp_event.h"
 #include "esp_log.h"
 #include "esp_netif.h"
@@ -122,25 +123,25 @@ esp_err_t board_wifi_start_sta()
         return ESP_OK;
     }
 
-    ESP_ERROR_CHECK(esp_netif_init());
-    ESP_ERROR_CHECK(esp_event_loop_create_default());
     auto *sta_netif = esp_netif_create_default_wifi_sta();
     // 首次申请 DHCP 租约时就携带产品主机名。
     ESP_ERROR_CHECK_WITHOUT_ABORT(esp_netif_set_hostname(sta_netif, "LumenFolio"));
 
     wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
-    ESP_ERROR_CHECK(esp_wifi_init(&cfg));
-    ESP_ERROR_CHECK(esp_event_handler_register(WIFI_EVENT, ESP_EVENT_ANY_ID, &on_wifi_event, nullptr));
-    ESP_ERROR_CHECK(esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP, &on_got_ip, nullptr));
-    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
+    ESP_RETURN_ON_ERROR(esp_wifi_init(&cfg), kTag, "初始化 Wi-Fi");
+    ESP_RETURN_ON_ERROR(esp_event_handler_register(WIFI_EVENT, ESP_EVENT_ANY_ID, &on_wifi_event, nullptr),
+                        kTag, "注册 Wi-Fi 事件");
+    ESP_RETURN_ON_ERROR(esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP, &on_got_ip, nullptr),
+                        kTag, "注册 DHCP 事件");
+    ESP_RETURN_ON_ERROR(esp_wifi_set_mode(WIFI_MODE_STA), kTag, "设置 STA 模式");
 
     wifi_config_t sta = {};
     memcpy(sta.sta.ssid, lumenfolio::board_wifi::kSsid, sizeof(lumenfolio::board_wifi::kSsid));
     memcpy(sta.sta.password, lumenfolio::board_wifi::kPassword, sizeof(lumenfolio::board_wifi::kPassword));
-    ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &sta));
-    ESP_ERROR_CHECK(esp_wifi_start());
+    ESP_RETURN_ON_ERROR(esp_wifi_set_config(WIFI_IF_STA, &sta), kTag, "设置 STA 配置");
+    ESP_RETURN_ON_ERROR(esp_wifi_start(), kTag, "启动 STA");
     // OTA 传输不需要省电，关掉 modem sleep，射频保持唤醒。
-    ESP_ERROR_CHECK(esp_wifi_set_ps(WIFI_PS_NONE));
+    ESP_ERROR_CHECK_WITHOUT_ABORT(esp_wifi_set_ps(WIFI_PS_NONE));
 
     if (xTaskCreate(retry_task, "wifi_retry", 3072, nullptr, 3, &retry_task_handle) != pdPASS) {
         return ESP_ERR_NO_MEM;

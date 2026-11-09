@@ -12,6 +12,7 @@
 #include "freertos/task.h"
 #include "esp_http_server.h"
 #include "esp_timer.h"
+#include "lwip/sockets.h"
 #include "ota_service.h"
 #include "ota_update.h"
 
@@ -127,7 +128,8 @@ static esp_err_t failRequest(httpd_req_t *request, const char *status, const cha
  * @brief POST /ota handler：接收并写入完整固件镜像。
  *
  * 要求固定 Content-Length 与 application/octet-stream；按 4 KiB 分块流式
- * 写入，总接收时间超过 120 s 视为超时。任何失败都会中止 OTA 并返回可读错误。
+ * 写入。局域网总时限 120 s，本机 BLE 隧道时限 15 min，两者均沿用 HTTP 的断流超时。
+ * 任何失败都会中止 OTA 并返回可读错误。
  *
  * @param[in,out] request HTTP 请求。
  * @return ESP_OK 表示镜像已写入并已安排重启；失败返回 ESP_FAIL。
@@ -149,8 +151,23 @@ static esp_err_t upload(httpd_req_t *request)
         return failRequest(request, "500 Internal Server Error", "Could not begin the OTA write.");
 
     size_t remaining = request->content_len;
-    /* 整个上传必须在 120 s 内完成，防止断流长期占用写 Flash 窗口。 */
-    const int64_t deadline = esp_timer_get_time() + 120LL * 1000000;
+    // BLE 隧道从 127.0.0.1 接入，ATT 往返延迟可使传输超过局域网时限。
+    struct sockaddr_storage peer = {0};
+    socklen_t peer_len = sizeof(peer);
+    bool loopback = false;
+    if (getpeername(httpd_req_to_sockfd(request), (struct sockaddr *)&peer, &peer_len) == 0) {
+        if (peer.ss_family == AF_INET) {
+            loopback = ((struct sockaddr_in *)&peer)->sin_addr.s_addr == htonl(INADDR_LOOPBACK);
+        }
+#if LWIP_IPV6
+        if (peer.ss_family == AF_INET6) {
+            const struct in6_addr *addr = &((struct sockaddr_in6 *)&peer)->sin6_addr;
+            static const unsigned char mapped_loopback[16] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xff, 0xff, 127, 0, 0, 1};
+            loopback = memcmp(addr, mapped_loopback, sizeof(mapped_loopback)) == 0;
+        }
+#endif
+    }
+    const int64_t deadline = esp_timer_get_time() + (loopback ? 900LL : 120LL) * 1000000;
     while (remaining) {
         if (esp_timer_get_time() >= deadline) { error = ESP_ERR_TIMEOUT; break; }
         const size_t count = remaining < sizeof(uploadBuffer) ? remaining : sizeof(uploadBuffer);

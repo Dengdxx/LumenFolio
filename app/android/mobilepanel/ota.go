@@ -17,7 +17,7 @@ func InspectFirmware(data []byte) (string, error) {
 	return ota.Inspect(bytes.NewReader(data), int64(len(data)))
 }
 
-// UpgradeFirmware 执行局域网 OTA，等待目标镜像启动并确认后返回。Android 须在后台调用。
+// UpgradeFirmware 通过当前连接执行 OTA，等待目标镜像启动并确认后返回。Android 须在后台调用。
 func UpgradeFirmware(host string, data []byte, listener OTAListener) error {
 	return ota.Upgrade(context.Background(), host, devicePort, bytes.NewReader(data), int64(len(data)), func(progress ota.Progress) {
 		listener.OnProgress(progress.Message, progress.Sent, progress.Total)

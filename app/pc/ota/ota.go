@@ -1,8 +1,8 @@
-// Package ota 是相框的局域网固件升级客户端。
+// Package ota 是相框的固件升级客户端。
 // 命令行和界面都调用这里：界面不解析命令行，命令行也不进入界面。
 package ota
 
-// 本文件实现局域网 OTA：通过 HTTP 查询状态、流式上传应用镜像、等待重启并确认新固件。
+// 通过 HTTP 查询状态、流式上传应用镜像、等待重启并确认新固件。
 import (
 	"bytes"
 	"context"
@@ -20,6 +20,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"lumenfolio/devicehttp"
 )
 
 const (
@@ -122,14 +124,27 @@ func decodeOTAResponse(response *http.Response) (otaStatus, error) {
 	return status, nil
 }
 
-// getOTAStatus 以 3 秒超时请求 GET base/ota/status 并解析状态。
+// otaControlRequest 为状态和确认请求设置超时，蓝牙需要预留重连时间。
+func otaControlRequest(ctx context.Context, method, endpoint string) (*http.Request, context.CancelFunc, error) {
+	request, err := http.NewRequestWithContext(ctx, method, endpoint, nil)
+	if err != nil {
+		return nil, nil, err
+	}
+	timeout := 3 * time.Second
+	if devicehttp.IsBluetooth(request.URL.Hostname()) {
+		timeout = devicehttp.BluetoothConnectTimeout
+	}
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	return request.WithContext(ctx), cancel, nil
+}
+
+// getOTAStatus 请求 GET base/ota/status 并解析状态。
 func getOTAStatus(ctx context.Context, client *http.Client, base string) (otaStatus, error) {
-	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
-	defer cancel()
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, base+"/ota/status", nil)
+	request, cancel, err := otaControlRequest(ctx, http.MethodGet, base+"/ota/status")
 	if err != nil {
 		return otaStatus{}, err
 	}
+	defer cancel()
 	response, err := client.Do(request)
 	if err != nil {
 		return otaStatus{}, err
@@ -167,17 +182,16 @@ func DeviceStatus(ctx context.Context, host string, port int) (string, error) {
 	return fmt.Sprintf("电量 %s · %s · 温度 %s · 湿度 %s", battery, charge, temperature, humidity), nil
 }
 
-// confirmOTA 以 3 秒超时请求 POST base/ota/confirm。
+// confirmOTA 请求 POST base/ota/confirm。
 //
 // 通过 X-OTA-Partition、X-OTA-Version、X-OTA-Image 头携带目标槽、版本和镜像标识，
 // 让设备确认当前运行的新固件。
 func confirmOTA(ctx context.Context, client *http.Client, base, partition string, image otaImage) error {
-	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
-	defer cancel()
-	request, err := http.NewRequestWithContext(ctx, http.MethodPost, base+"/ota/confirm", nil)
+	request, cancel, err := otaControlRequest(ctx, http.MethodPost, base+"/ota/confirm")
 	if err != nil {
 		return err
 	}
+	defer cancel()
 	request.Header.Set("X-OTA-Partition", partition)
 	request.Header.Set("X-OTA-Version", image.Version)
 	request.Header.Set("X-OTA-Image", image.ImageID)
@@ -306,14 +320,18 @@ func Upgrade(ctx context.Context, host string, port int, source io.ReaderAt, siz
 	if host == "" || port < 1 || port > 65535 {
 		return errors.New("相框地址或 OTA 端口无效")
 	}
-	return upgrade(ctx, host, port, source, size, defaultUploadTimeout, defaultWaitTimeout, report)
+	uploadTimeout := defaultUploadTimeout
+	if devicehttp.IsBluetooth(host) {
+		uploadTimeout = devicehttp.BluetoothTransferTimeout
+	}
+	return upgrade(ctx, host, port, source, size, uploadTimeout, defaultWaitTimeout, report)
 }
 
 func newOTAClient(host string, port int) (*http.Client, string) {
 	base := "http://" + net.JoinHostPort(host, strconv.Itoa(port))
 	transport := http.DefaultTransport.(*http.Transport).Clone()
 	transport.Proxy = nil // 私有局域网固件直连设备，不经环境变量指定的代理。
-	return &http.Client{Transport: transport, CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
+	return &http.Client{Transport: devicehttp.WithBluetooth(transport), CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
 		return http.ErrUseLastResponse
 	}}, base
 }

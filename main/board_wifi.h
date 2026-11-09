@@ -29,6 +29,7 @@ inline constexpr char kPassword[] = "88888888";
  *         否则返回底层错误码。
  *
  * @note 连接是异步的，成功与否看日志（拿到 IP 会打印 IP_EVENT_STA_GOT_IP 一行）。
+ * @note 调用方先初始化 esp_netif 与默认事件循环，BLE 的回环服务也使用同一套网络栈。
  * @note 失败时调用方应继续运行：屏幕仍要能显示，不能因为连不上就停机。
  */
 esp_err_t board_wifi_start_sta();

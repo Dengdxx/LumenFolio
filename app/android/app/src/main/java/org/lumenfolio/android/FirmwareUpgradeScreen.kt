@@ -29,7 +29,11 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 
 @Composable
-internal fun FirmwareUpgradeScreen(model: FrameUploadViewModel, modifier: Modifier = Modifier) {
+internal fun FirmwareUpgradeScreen(
+    model: FrameUploadViewModel,
+    onBluetooth: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
     val focus = LocalFocusManager.current
     val choose = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         uri?.let(model::selectFirmware)
@@ -37,7 +41,8 @@ internal fun FirmwareUpgradeScreen(model: FrameUploadViewModel, modifier: Modifi
     var confirming by rememberSaveable { mutableStateOf(false) }
     val selected = model.firmware
     val feedback = model.firmwareFeedback
-    val host = model.address.trim()
+    val host = model.host
+    val connection = model.bluetooth?.let { "蓝牙 · ${it.name}" } ?: host
     val canUpgrade = selected != null && host.isNotEmpty() && !model.busy
 
     Box(
@@ -48,10 +53,10 @@ internal fun FirmwareUpgradeScreen(model: FrameUploadViewModel, modifier: Modifi
             Panel {
                 Text("固件升级", style = MaterialTheme.typography.titleMedium)
                 Text(
-                    "将手机与相框接入同一局域网，唤醒相框后选择下载好的 LumenFolio 应用固件。",
+                    "唤醒相框并通过局域网或蓝牙连接，然后选择下载好的 LumenFolio 应用固件。",
                     style = MaterialTheme.typography.bodyMedium,
                 )
-                FrameAddressField(model.address, model::editAddress, enabled = !model.busy)
+                FrameConnectionField(model.address, model.bluetooth, model::editAddress, onBluetooth, enabled = !model.busy)
                 OutlinedButton(
                     onClick = {
                         focus.clearFocus()
@@ -103,7 +108,7 @@ internal fun FirmwareUpgradeScreen(model: FrameUploadViewModel, modifier: Modifi
             onDismissRequest = { confirming = false },
             title = { Text("确认固件升级") },
             text = {
-                Text("相框 $host\n固件 ${selected.name}\n版本 ${selected.version}\n\n升级期间请保持相框供电和网络连接，等待 App 确认重启后的固件。")
+                Text("相框 $connection\n固件 ${selected.name}\n版本 ${selected.version}\n\n升级期间请保持相框供电和当前连接，等待 App 确认重启后的固件。")
             },
             confirmButton = {
                 TextButton(onClick = {

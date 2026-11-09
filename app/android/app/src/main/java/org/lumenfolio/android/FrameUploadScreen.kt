@@ -87,6 +87,8 @@ internal fun FrameUploadScreen(model: FrameUploadViewModel) {
     }
 
     var page by rememberSaveable { mutableStateOf(FramePage.EDITOR) }
+    var showingBluetooth by rememberSaveable { mutableStateOf(false) }
+    val openBluetooth = { showingBluetooth = true }
     val editorScroll = rememberScrollState()
     BackHandler(enabled = page != FramePage.EDITOR) {
         if (!model.busy) page = FramePage.EDITOR
@@ -108,11 +110,13 @@ internal fun FrameUploadScreen(model: FrameUploadViewModel) {
         when (page) {
             FramePage.PICTURES -> DevicePicturesScreen(
                 address = model.address,
+                bluetooth = model.bluetooth,
                 onAddressChange = model::editAddress,
                 onConnected = model::rememberAddress,
+                onBluetooth = openBluetooth,
                 modifier = contentModifier,
             )
-            FramePage.FIRMWARE -> FirmwareUpgradeScreen(model, contentModifier)
+            FramePage.FIRMWARE -> FirmwareUpgradeScreen(model, openBluetooth, contentModifier)
             FramePage.EDITOR -> Box(
                 modifier = contentModifier
                     .verticalScroll(editorScroll)
@@ -128,9 +132,16 @@ internal fun FrameUploadScreen(model: FrameUploadViewModel) {
                         model,
                         onExport = { export.launch("frame.bin") },
                         onUpgrade = { page = FramePage.FIRMWARE },
+                        onBluetooth = openBluetooth,
                     )
                 }
             }
+        }
+    }
+    if (showingBluetooth) {
+        FrameBluetoothDialog(model) {
+            showingBluetooth = false
+            model.clearBluetoothError()
         }
     }
 }
@@ -297,11 +308,16 @@ private fun InkSwatches() {
 }
 
 @Composable
-private fun FrameUploadPanel(model: FrameUploadViewModel, onExport: () -> Unit, onUpgrade: () -> Unit) {
+private fun FrameUploadPanel(
+    model: FrameUploadViewModel,
+    onExport: () -> Unit,
+    onUpgrade: () -> Unit,
+    onBluetooth: () -> Unit,
+) {
     val colors = MaterialTheme.colorScheme
     val focusManager = LocalFocusManager.current
     val ready = model.editor != null && !model.busy
-    val host = model.address.trim()
+    val host = model.host
     val progress = model.uploadProgress
     val reply = model.reply
     LaunchedEffect(host) { model.detectUploadDestination(host) }
@@ -314,13 +330,15 @@ private fun FrameUploadPanel(model: FrameUploadViewModel, onExport: () -> Unit, 
             UploadStatusBadge(model.sending, progress?.stage, reply)
         }
         Text(
-            "上传时手机和相框需在同一局域网。相框休眠时，先按机身键唤醒。",
+            "使用同一局域网或蓝牙连接相框。相框休眠时，先按机身键唤醒。",
             color = colors.onSurfaceVariant,
             style = MaterialTheme.typography.bodyMedium,
         )
-        FrameAddressField(
+        FrameConnectionField(
             address = model.address,
+            bluetooth = model.bluetooth,
             onAddressChange = model::editAddress,
+            onBluetooth = onBluetooth,
             enabled = !model.busy,
         )
         Text("存储位置", style = MaterialTheme.typography.labelLarge)
@@ -398,7 +416,25 @@ private fun FrameUploadPanel(model: FrameUploadViewModel, onExport: () -> Unit, 
 }
 
 @Composable
-internal fun FrameAddressField(address: String, onAddressChange: (String) -> Unit, enabled: Boolean = true) {
+internal fun FrameConnectionField(
+    address: String,
+    bluetooth: FrameBluetoothSelection?,
+    onAddressChange: (String) -> Unit,
+    onBluetooth: () -> Unit,
+    enabled: Boolean = true,
+) {
+    if (bluetooth == null) {
+        FrameAddressField(address, onAddressChange, enabled)
+    } else {
+        Text("蓝牙 · ${bluetooth.name}", style = MaterialTheme.typography.bodyMedium)
+    }
+    OutlinedButton(onClick = onBluetooth, enabled = enabled, modifier = Modifier.fillMaxWidth()) {
+        Text(if (bluetooth == null) "蓝牙连接" else "管理蓝牙连接")
+    }
+}
+
+@Composable
+private fun FrameAddressField(address: String, onAddressChange: (String) -> Unit, enabled: Boolean) {
     val colors = MaterialTheme.colorScheme
     OutlinedTextField(
         value = address,

@@ -6,6 +6,7 @@ LumenFolio 是基于 ESP32-S3 和六色电子纸的低功耗相框。Windows 和
 
 - [Windows 应用](docs/preview.md)
 - [Android 应用](app/android/README.md)
+- [蓝牙连接](docs/bluetooth.md)
 - [固件构建与局域网 OTA](docs/ota.md)
 - [安装包与固件发布](docs/release.md)
 - [品牌素材](assets/branding/README.md)

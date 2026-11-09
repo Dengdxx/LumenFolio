@@ -17,6 +17,7 @@ import (
 
 	"golang.org/x/image/draw"
 
+	"lumenfolio/devicehttp"
 	"lumenfolio/panel"
 )
 
@@ -77,12 +78,15 @@ type responseError struct {
 func (e responseError) Error() string { return e.message }
 
 var client = &http.Client{
-	Transport: &http.Transport{DialContext: (&net.Dialer{Timeout: 5 * time.Second}).DialContext},
+	Transport: devicehttp.WithBluetooth(&http.Transport{DialContext: (&net.Dialer{Timeout: 5 * time.Second}).DialContext}),
 	Timeout:   15 * time.Second,
 	CheckRedirect: func(*http.Request, []*http.Request) error {
 		return http.ErrUseLastResponse
 	},
 }
+
+// BLE 连续读整帧时不能沿用局域网 15 秒的整体超时。
+var bluetoothClient = &http.Client{Transport: client.Transport, CheckRedirect: client.CheckRedirect}
 
 // List 读取指定存储的图片清单。SD 未挂载和已挂载但没有图片分别返回错误和空列表。
 func List(ctx context.Context, host string, port int, source Source) ([]Picture, error) {
@@ -234,10 +238,21 @@ func frameQuery(source Source, id string) url.Values {
 	return url.Values{"source": {string(source)}, "id": {id}}
 }
 
-// request 直连局域网相框，并按接口允许的字节数限制响应。
+// request 通过所选链路访问相框，并按接口允许的字节数限制响应。
 func request(ctx context.Context, method, host string, port int, path string, query url.Values, wantStatus, limit int, missing string) ([]byte, error) {
 	if port < 1 || port > 65535 {
 		return nil, fmt.Errorf("端口超出范围：%d", port)
+	}
+	selectedClient := client
+	if devicehttp.IsBluetooth(host) {
+		timeout := devicehttp.BluetoothConnectTimeout
+		if path == "/frame/thumb" || (method == http.MethodGet && path == "/frame") {
+			timeout = devicehttp.BluetoothTransferTimeout
+		}
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, timeout)
+		defer cancel()
+		selectedClient = bluetoothClient
 	}
 	// ESP-IDF 返回原始查询串。百分号编码空格，和文件名里的加号区分。
 	endpoint := url.URL{Scheme: "http", Host: net.JoinHostPort(host, strconv.Itoa(port)), Path: path,
@@ -247,7 +262,7 @@ func request(ctx context.Context, method, host string, port int, path string, qu
 		return nil, err
 	}
 	request.Close = true
-	response, err := client.Do(request)
+	response, err := selectedClient.Do(request)
 	if err != nil {
 		return nil, err
 	}

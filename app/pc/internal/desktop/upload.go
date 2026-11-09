@@ -3,7 +3,6 @@ package desktop
 import (
 	"context"
 	"fmt"
-	"strings"
 	"time"
 
 	"gioui.org/layout"
@@ -75,7 +74,7 @@ func (p *uploadPanel) applyStorage(result uploadStorageResult) bool {
 }
 
 func (u *ui) syncUploadHost() {
-	host := strings.TrimSpace(u.hostEditor.Text())
+	host := u.deviceHost()
 	p := &u.upload
 	if host != p.host {
 		p.host = host

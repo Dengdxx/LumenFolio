@@ -52,6 +52,7 @@ internal enum class FrameDestination(val source: String, val label: String) {
 
 internal data class FrameUploadProgress(val stage: String, val percent: Int, val message: String)
 internal data class FrameUploadReply(val message: String, val error: Boolean = false)
+internal data class FrameBluetoothSelection(val host: String, val name: String, val address: String)
 
 /** 确认界面展示的版本和上传的数据来自同一份已选镜像。 */
 internal class SelectedFirmware(val name: String, val version: String, val data: ByteArray)
@@ -73,6 +74,13 @@ internal class FrameUploadViewModel(application: Application) : AndroidViewModel
     var previewing by mutableStateOf(false)
         private set
     var address by mutableStateOf(preferences.getString("frame_address", "").orEmpty())
+        private set
+    var bluetooth by mutableStateOf<FrameBluetoothSelection?>(null)
+        private set
+    val host: String get() = bluetooth?.host ?: address.trim()
+    var bluetoothConnecting by mutableStateOf(false)
+        private set
+    var bluetoothError by mutableStateOf<String?>(null)
         private set
     var uploadDestination by mutableStateOf<FrameDestination?>(null)
         private set
@@ -178,11 +186,56 @@ internal class FrameUploadViewModel(application: Application) : AndroidViewModel
     fun editAddress(value: String) {
         if (busy) return
         if (address.trim() != value.trim()) {
-            manualDestination = false
-            uploadDestination = null
+            resetUploadDestination()
         }
         address = value
         reply = null
+    }
+
+    fun clearBluetoothError() {
+        bluetoothError = null
+    }
+
+    /** 先从 BLE 读取状态确认连接可用，再让相框操作切换到该连接。 */
+    fun connectBluetooth(frame: NearbyFrame) {
+        if (busy || bluetooth != null) return
+        bluetoothError = null
+        bluetoothConnecting = true
+        runOperation(failure = "蓝牙连接失败", onFailure = { bluetoothError = it }) {
+            var registeredHost: String? = null
+            try {
+                bluetooth = withContext(Dispatchers.IO) {
+                    val target = Mobilepanel.useBluetooth(
+                        frame.address, FrameBluetoothDialer(getApplication<Application>(), frame.device),
+                    )
+                    registeredHost = target
+                    Mobilepanel.deviceStatus(target)
+                    FrameBluetoothSelection(target, frame.name, frame.address)
+                }
+                resetUploadDestination()
+            } finally {
+                registeredHost?.takeIf { it != bluetooth?.host }?.let(Mobilepanel::forgetBluetooth)
+                bluetoothConnecting = false
+            }
+        }
+    }
+
+    fun disconnectBluetooth() {
+        if (busy) return
+        bluetooth?.let { Mobilepanel.forgetBluetooth(it.host) }
+        bluetooth = null
+        resetUploadDestination()
+        reply = null
+    }
+
+    override fun onCleared() {
+        bluetooth?.let { Mobilepanel.forgetBluetooth(it.host) }
+        super.onCleared()
+    }
+
+    private fun resetUploadDestination() {
+        manualDestination = false
+        uploadDestination = null
     }
 
     fun selectUploadDestination(destination: FrameDestination) {
@@ -206,21 +259,21 @@ internal class FrameUploadViewModel(application: Application) : AndroidViewModel
             false
         }
         currentCoroutineContext().ensureActive()
-        if (host == address.trim() && !manualDestination) {
+        if (host == this.host && !manualDestination) {
             uploadDestination = if (sdAvailable) FrameDestination.SD else FrameDestination.FLASH
         }
     }
 
-    /** 传图、浏览和固件升级使用同一个最近连接成功的相框地址。 */
+    /** 传图、浏览和固件升级共用上次成功的 Wi-Fi 地址，蓝牙选择只在本次运行有效。 */
     fun rememberAddress(host: String) {
-        preferences.edit().putString("frame_address", host).apply()
+        if (host == address.trim()) preferences.edit().putString("frame_address", host).apply()
     }
 
     fun sendPicture() {
         val snapshot = editor ?: return
         val destination = uploadDestination ?: return
         val preset = algorithm
-        val host = address.trim()
+        val host = this.host
         if (host.isEmpty()) return
         runOperation(upload = true, failure = "没能发送画面", onFailure = { reply = FrameUploadReply(it, error = true) }) {
             val rendered = render(snapshot, preset)
@@ -293,7 +346,7 @@ internal class FrameUploadViewModel(application: Application) : AndroidViewModel
     /** ViewModel 持有升级任务，配置变化时重用同一事务，避免重新上传或丢失确认。 */
     fun upgradeFirmware() {
         val selected = firmware ?: return
-        val host = address.trim()
+        val host = this.host
         if (host.isEmpty()) return
         runOperation(failure = "固件升级未确认", onFailure = ::firmwareError) {
             coroutineScope {

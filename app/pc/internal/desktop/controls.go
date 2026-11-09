@@ -137,6 +137,9 @@ func (u *ui) tabButton(label string, clickable *widget.Clickable, active bool, a
 }
 
 func (u *ui) hostField(gtx layout.Context) layout.Dimensions {
+	if u.bluetooth.host != "" {
+		return layout.Inset{Top: 6, Bottom: 6, Left: 8, Right: 8}.Layout(gtx, u.section(u.deviceLabel(u.bluetooth.host)))
+	}
 	if u.upload.cancelSend != nil {
 		gtx = gtx.Disabled()
 	}

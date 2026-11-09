@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"lumenfolio/devicehttp"
 	"lumenfolio/panel"
 )
 
@@ -41,7 +42,11 @@ func Send(ctx context.Context, host string, port int, frame []byte) (string, err
 	transport := http.DefaultTransport.(*http.Transport).Clone()
 	transport.Proxy = nil // 局域网直连设备，不走环境变量里的代理。
 	defer transport.CloseIdleConnections()
-	client := &http.Client{Transport: transport, Timeout: 3 * time.Minute}
+	timeout := 3 * time.Minute
+	if devicehttp.IsBluetooth(host) {
+		timeout = devicehttp.BluetoothTransferTimeout
+	}
+	client := &http.Client{Transport: devicehttp.WithBluetooth(transport), Timeout: timeout}
 	response, err := client.Do(request)
 	if err != nil {
 		return "", err

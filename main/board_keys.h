@@ -8,12 +8,11 @@
 
 /**
  * @file board_keys.h
- * @brief 三个按键：GPIO 下降沿中断加时间窗消抖。
+ * @brief 三个按键：GPIO 边沿中断加时间窗消抖。
  *
  * 引脚见 board_pins.h：KEY1 GPIO3、KEY2 GPIO8、KEY3 GPIO18，外部 10k 上拉、
- * 按下接地，所以按下是下降沿。机械抖动会在一两毫秒内产生一串下降沿，
- * 中断里用 tick 时间戳开一个 60 ms 的窗口，窗口内的后续边沿直接丢掉：
- * 一次按下只发一条事件，按住不放也不会连发。
+ * 按下接地。KEY1、KEY2 的下降沿中断用 60 ms 时间窗消抖，按住不连发。
+ * KEY3 由独立任务判定短按或长按，避免显示任务忙时延误蓝牙窗口。
  *
  * 中断只做判定和投递，不做任何耗时动作。翻页与刷屏由显示任务串行处理，
  * 因为一次整帧刷新要几十秒，放在中断或按键上下文里会拖垮系统。
@@ -25,7 +24,7 @@
 typedef enum {
     BOARD_KEY_PREV = 0, /**< KEY1（GPIO3）：上一张。 */
     BOARD_KEY_NEXT,     /**< KEY2（GPIO8）：下一张。 */
-    BOARD_KEY_AUX,      /**< KEY3（GPIO18）：暂未分配。 */
+    BOARD_KEY_AUX,      /**< KEY3（GPIO18）：短按重刷，长按开启蓝牙。 */
 } board_key_t;
 
 /** @brief 一次按下事件。 */
@@ -36,11 +35,12 @@ typedef struct {
 /**
  * @brief 注册中断并创建事件队列。重复调用返回 ESP_OK。
  *
+ * @param aux_wake 是否由 KEY3 唤醒。唤醒时的按下沿已发生，由任务补判短按或长按。
  * @return ESP_OK 成功；GPIO 中断服务或队列创建失败时返回底层错误码。
  *
  * @note 会调用 gpio_install_isr_service()；若别的模块已经装过，按成功处理。
  */
-esp_err_t board_keys_init(void);
+esp_err_t board_keys_init(bool aux_wake);
 
 /**
  * @brief 等待一条按下事件。

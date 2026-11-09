@@ -17,6 +17,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"lumenfolio/devicehttp"
 	"lumenfolio/panel"
 )
 
@@ -60,7 +61,11 @@ func SendTo(ctx context.Context, host string, port int, data []byte, target Targ
 	if target == SD {
 		storage = "SD 卡"
 	}
-	reader := &transferReader{reader: bytes.NewReader(data), total: len(data), storage: storage, report: report}
+	timeout, uploading := 3*time.Minute, "正在无线上传…"
+	if devicehttp.IsBluetooth(host) {
+		timeout, uploading = devicehttp.BluetoothTransferTimeout, "正在通过蓝牙上传…"
+	}
+	reader := &transferReader{reader: bytes.NewReader(data), total: len(data), storage: storage, uploading: uploading, report: report}
 	request, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint.String(), reader)
 	if err != nil {
 		return "", err
@@ -71,10 +76,10 @@ func SendTo(ctx context.Context, host string, port int, data []byte, target Targ
 	transport := http.DefaultTransport.(*http.Transport).Clone()
 	transport.Proxy = nil
 	defer transport.CloseIdleConnections()
-	client := &http.Client{Transport: transport, Timeout: 3 * time.Minute, CheckRedirect: func(*http.Request, []*http.Request) error {
+	client := &http.Client{Transport: devicehttp.WithBluetooth(transport), Timeout: timeout, CheckRedirect: func(*http.Request, []*http.Request) error {
 		return http.ErrUseLastResponse
 	}}
-	report(Progress{"upload", 0, "正在无线上传…"})
+	report(Progress{"upload", 0, uploading})
 	response, err := client.Do(request)
 	reader.stopReporting()
 	if err != nil {
@@ -114,11 +119,12 @@ func SendTo(ctx context.Context, host string, port int, data []byte, target Targ
 
 // transferReader 只估计请求体发送量，存储完成以相框的 HTTP 回执为准。
 type transferReader struct {
-	reader  *bytes.Reader
-	total   int
-	storage string
-	mu      sync.Mutex
-	report  func(Progress)
+	reader    *bytes.Reader
+	total     int
+	storage   string
+	uploading string
+	mu        sync.Mutex
+	report    func(Progress)
 }
 
 func (r *transferReader) Read(p []byte) (int, error) {
@@ -129,7 +135,7 @@ func (r *transferReader) Read(p []byte) (int, error) {
 		if left := r.reader.Len(); left == 0 {
 			r.report(Progress{"storage", 70, "正在完成" + r.storage + "写入…"})
 		} else {
-			r.report(Progress{"upload", (r.total - left) * 65 / r.total, "正在无线上传…"})
+			r.report(Progress{"upload", (r.total - left) * 65 / r.total, r.uploading})
 		}
 	}
 	return n, err

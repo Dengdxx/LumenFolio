@@ -91,12 +91,15 @@ private sealed interface PictureRead<out T> {
 @Composable
 internal fun DevicePicturesScreen(
     address: String,
+    bluetooth: FrameBluetoothSelection?,
     onAddressChange: (String) -> Unit,
     onConnected: (String) -> Unit,
+    onBluetooth: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val focusManager = LocalFocusManager.current
-    var host by remember { mutableStateOf(address.trim()) }
+    val connectionHost = bluetooth?.host ?: address.trim()
+    var host by remember(bluetooth?.host) { mutableStateOf(connectionHost) }
     var source by rememberSaveable { mutableStateOf(PictureSource.ARTIFACTS) }
     var listRefresh by remember { mutableStateOf(0) }
     var infoRefresh by remember { mutableStateOf(0) }
@@ -208,10 +211,15 @@ internal fun DevicePicturesScreen(
                             is PictureRead.Failure -> "相框状态不可用"
                         },
                     )
-                    FrameAddressField(address, onAddressChange = { value ->
-                        onAddressChange(value)
-                        host = ""
-                    })
+                    FrameConnectionField(
+                        address = address,
+                        bluetooth = bluetooth,
+                        onAddressChange = { value ->
+                            onAddressChange(value)
+                            host = ""
+                        },
+                        onBluetooth = onBluetooth,
+                    )
                     Row(
                         modifier = Modifier.horizontalScroll(rememberScrollState()),
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -235,10 +243,10 @@ internal fun DevicePicturesScreen(
                         Button(
                             onClick = {
                                 focusManager.clearFocus()
-                                host = address.trim()
+                                host = connectionHost
                                 listRefresh++
                             },
-                            enabled = address.isNotBlank() && result != PictureRead.Loading,
+                            enabled = connectionHost.isNotEmpty() && result != PictureRead.Loading,
                             modifier = Modifier.weight(1f),
                         ) {
                             Text(if (host.isEmpty()) "读取列表" else "刷新列表")
@@ -257,7 +265,7 @@ internal fun DevicePicturesScreen(
             }
 
             when (result) {
-                null -> item { PictureMessage("输入相框地址后读取图片。") }
+                null -> item { PictureMessage("输入相框地址或连接蓝牙后读取图片。") }
                 PictureRead.Loading -> item { PictureLoading("正在读取${source.label}图片…") }
                 is PictureRead.Failure -> item { PictureMessage("读取列表失败：${result.message}", error = true) }
                 is PictureRead.Success -> {

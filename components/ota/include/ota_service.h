@@ -4,7 +4,7 @@
  *
  * 在 core 0 上提供 GET /ota/status、POST /ota、POST /ota/confirm 三个接口，
  * 端口 OTA_HTTP_PORT；设备控制类接口通过 otaServiceRegisterHandler() 挂在同一个
- * 服务上。服务在 Wi-Fi 启动后即开启，不等待屏幕自检，使卡在初始化阶段的旧镜像
+ * 服务上。服务在网络栈初始化后开启，不等待 Wi-Fi 联网或屏幕自检，使卡在初始化阶段的旧镜像
  * 仍可被替换。
  */
 #pragma once
@@ -37,7 +37,7 @@ esp_err_t otaServiceInit(void);
  *
  * @return ESP_OK 成功；端口占用、内存不足或 handler 注册失败时返回错误码。
  *
- * @note 必须在 SoftAP 与 netif 已经起来之后调用，否则监听无法绑定。
+ * @note 必须在 esp_netif_init() 之后调用。局域网与 BLE 回环共用此监听端口。
  */
 esp_err_t otaServiceStart(void);
 

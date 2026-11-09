@@ -7,7 +7,6 @@ import (
 	"image"
 	"io"
 	"path/filepath"
-	"strings"
 
 	"gioui.org/layout"
 	"gioui.org/unit"
@@ -104,7 +103,7 @@ func readOTAFirmware(file io.ReadCloser) (otaFirmware, error) {
 }
 
 func (u *ui) startOTA() {
-	host := strings.TrimSpace(u.hostEditor.Text())
+	host := u.deviceHost()
 	if host == "" {
 		u.ota.progress = ota.Progress{Message: "先填写相框地址。"}
 		return
@@ -151,7 +150,7 @@ func (u *ui) otaLayout(gtx layout.Context) layout.Dimensions {
 				return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
 					layout.Rigid(material.Subtitle1(u.theme, "固件升级").Layout),
 					layout.Rigid(gap(16)),
-					layout.Rigid(u.section("相框地址")),
+					layout.Rigid(u.section("相框连接")),
 					layout.Rigid(gap(6)),
 					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 						if u.fileBusy {

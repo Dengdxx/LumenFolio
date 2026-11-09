@@ -8,6 +8,7 @@
 #include "app.h"
 #include "artifacts.h"
 #include "console.h"
+#include "board_ble.h"
 #include "board_i2c.h"
 #include "board_init.h"
 #include "board_keys.h"
@@ -17,8 +18,11 @@
 #include "board_sleep.h"
 #include "board_wifi.h"
 #include "device_status.h"
+#include "driver/gpio.h"
 #include "driver/usb_serial_jtag.h"
 #include "esp_attr.h"
+#include "esp_event.h"
+#include "esp_netif.h"
 #include "esp_timer.h"
 #include "led_fsm.h"
 #include "ota_update.h"
@@ -249,11 +253,12 @@ esp_err_t show_picked_frame(const display_request &request)
 /**
  * @brief 睡前收尾并进入深度睡眠，不返回。
  *
- * 顺序不能换：先熄灯、卸载文件系统、把面板控制脚放开，最后才断 3V3_EXT 并睡。
+ * 顺序不能换：先停止 BLE 回调，再熄灯、卸载文件系统、释放面板控制脚，最后断 3V3_EXT 并睡。
  * 面板断电时控制脚若还拉着高电平，会经 ESD 二极管倒灌进已经关断的电源轨。
  */
 [[noreturn]] void enter_deep_sleep()
 {
+    board_ble_suspend();
     led_fsm_suspend();   // 未初始化时返回错误，灯本来就没亮过，忽略
     board_sd_unmount();  // 让 FAT 落盘、卡退出传输态
     epdParkBus();
@@ -278,6 +283,7 @@ void power_guard_task(void *)
         // 带 VBUS 的线由 s_plugged 拦住。再看枚举，只为不供电的烧录线：它只有
         // D+/D-，TP4056 一直报未接充电。这是台面特例，一般不会遇到。
         if (s_sleep_hold || s_plugged || s_frame_transfer_busy || usb_serial_jtag_is_connected() ||
+            board_ble_active() || gpio_get_level(lumenfolio::board::kKey3) == 0 ||
             s_display_state == display_state::busy) {
             continue;
         }
@@ -758,6 +764,11 @@ extern "C" void app_main(void)
     }
     ESP_ERROR_CHECK(ret);
 
+    // KEY3 独立判定长按，启动时尽早接管唤醒键，免得 SD 和 Wi-Fi 初始化吞掉长按。
+    if (board_keys_init(s_wake.key && s_wake.which == BOARD_KEY_AUX) != ESP_OK) {
+        ESP_LOGE(kTag, "按键不可用");
+    }
+
     // 温湿度挂在 3V3_MCU 常电上，不依赖 3V3_EXT，可以先于屏幕起来。
     if (board_i2c_init() == ESP_OK && shtc3_init(board_i2c_bus()) == ESP_OK) {
         if (xTaskCreate(env_task, "env", 4096, nullptr, 3, nullptr) != pdPASS) {
@@ -777,18 +788,20 @@ extern "C" void app_main(void)
         ESP_LOGI(kTag, "根目录共 %d 个条目", entries);
     }
 
-    // 连不上热点不停机：屏幕仍要能显示，60 s 回滚窗口照常走。
-    // 连接是异步的，这里只保证射频和 HTTP 服务都起来了，拿到 IP 由事件回调打印。
+    // HTTP 服务绑定所有接口，先启动回环和路由，BLE 不依赖 Wi-Fi 拿到 IP。
+    ESP_ERROR_CHECK(esp_netif_init());
+    ESP_ERROR_CHECK(esp_event_loop_create_default());
+    ESP_ERROR_CHECK(otaServiceStart());
+    register_console_route();
+    const esp_err_t browse = app_register_frame_browse();
+    if (browse != ESP_OK) {
+        ESP_LOGE(kTag, "画面浏览接口注册失败：%s", esp_err_to_name(browse));
+    }
+    board_ble_resume_update(otaServicePendingVerification());
+
     const esp_err_t wifi = board_wifi_start_sta();
-    if (wifi == ESP_OK) {
-        ESP_ERROR_CHECK(otaServiceStart());
-        register_console_route();
-        const esp_err_t browse = app_register_frame_browse();
-        if (browse != ESP_OK) {
-            ESP_LOGE(kTag, "画面浏览接口注册失败：%s", esp_err_to_name(browse));
-        }
-    } else {
-        ESP_LOGE(kTag, "Wi-Fi 未启动：%s，本次开机无法 OTA", esp_err_to_name(wifi));
+    if (wifi != ESP_OK) {
+        ESP_LOGW(kTag, "Wi-Fi 未启动：%s", esp_err_to_name(wifi));
     }
 
     ESP_LOGI(kTag, "board ready");
@@ -814,16 +827,11 @@ extern "C" void app_main(void)
     }
 
     // 唤醒的那一下按键本身就是一次操作，补投成命令，否则用户得按第二次才看得到画面。
-    if (s_wake.key) {
+    if (s_wake.key && s_wake.which != BOARD_KEY_AUX) {
         ESP_LOGI(kTag, "按键唤醒，按 KEY%d 处理", (int)s_wake.which + 1);
         app_post_display(cmd_for_key(s_wake.which));
     } else if (refresh_on_start) {
         app_post_display(display_cmd::refresh);
-    }
-
-    // 按键用下降沿中断，必须先于显示任务注册，否则第一次翻页会丢。
-    if (board_keys_init() != ESP_OK) {
-        ESP_LOGE(kTag, "按键不可用，翻页功能失效");
     }
 
     // 调试串口：USB-SERIAL-JTAG 的输入方向，和日志同一个口。

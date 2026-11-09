@@ -101,6 +101,7 @@ type ui struct {
 	upload    uploadPanel
 	gallery   galleryBrowser
 	ota       otaPage
+	bluetooth bluetoothPage
 
 	// 交互状态
 	canvasTag bool
@@ -146,8 +147,9 @@ func newUI(shaper *text.Shaper, initialFile string) *ui {
 			storageResults: make(chan uploadStorageResult, 1),
 			updates:        make(chan uploadUpdate, 1),
 		},
-		gallery: galleryBrowser{results: make(chan galleryResult, 1)},
-		ota:     otaPage{updates: make(chan otaUpdate, 1)},
+		gallery:   galleryBrowser{results: make(chan galleryResult, 1)},
+		ota:       otaPage{updates: make(chan otaUpdate, 1)},
+		bluetooth: bluetoothPage{results: make(chan bluetoothResult, 1)},
 	}
 	ui.hostEditor.SingleLine = true
 	return ui
@@ -156,6 +158,7 @@ func newUI(shaper *text.Shaper, initialFile string) *ui {
 func (u *ui) run(w *app.Window) error {
 	defer u.closeGallery()
 	defer u.upload.close()
+	defer u.bluetooth.close()
 	u.window = w
 	u.appWindow = w
 	u.explorer = explorer.NewExplorer(w)
@@ -257,6 +260,9 @@ func (u *ui) applyPendingResults() (changed bool) {
 			if update.finished {
 				u.fileBusy = false
 			}
+			changed = true
+		case result := <-u.bluetooth.results:
+			u.bluetooth.apply(result)
 			changed = true
 		default:
 			return changed
