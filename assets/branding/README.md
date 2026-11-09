@@ -41,3 +41,5 @@ Windows 侧栏和 Android 顶栏使用方形图标，系统图标也从同一份
 python app/pc/branding/generate.py
 Copy-Item -LiteralPath assets/branding/lumen-folio-icon.png -Destination app/android/app/src/main/res/drawable-nodpi/lumenfolio_icon.png
 ```
+
+Windows 生成器也会编译 `app/pc/branding/LumenFolio.manifest`。修改清单后用同一命令重新生成 Windows 资源。

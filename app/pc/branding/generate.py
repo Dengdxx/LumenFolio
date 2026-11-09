@@ -1,4 +1,4 @@
-"""Generate the Gio heading image and PE icon resources from the brand icon."""
+"""Generate the Gio icon and Windows executable resources."""
 
 from pathlib import Path
 import shutil
@@ -20,7 +20,8 @@ def main() -> None:
         with Image.open(source) as image:
             image.save(work / "icon.ico", sizes=sizes)
         # Gio 读取 Windows 的 IDI_APPLICATION（32512）。
-        (work / "icon.rc").write_text('32512 ICON "icon.ico"\n', encoding="ascii")
+        shutil.copyfile(branding / "LumenFolio.manifest", work / "app.manifest")
+        (work / "icon.rc").write_text('32512 ICON "icon.ico"\n1 24 "app.manifest"\n', encoding="ascii")
         subprocess.run(["llvm-rc", "/fo", "icon.res", "icon.rc"], cwd=work, check=True)
         for arch, machine in machines.items():
             output = f"icon_windows_{arch}.syso"
