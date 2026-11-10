@@ -50,7 +50,9 @@ func (u *ui) openOTA() {
 func (u *ui) closeOTA() {
 	u.ota.open = false
 	u.ota.firmware = otaFirmware{}
-	u.window.Invalidate()
+	if u.window != nil {
+		u.window.Invalidate()
+	}
 }
 
 func (u *ui) chooseOTAFirmware() {

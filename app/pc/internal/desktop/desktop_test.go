@@ -125,6 +125,7 @@ func TestCropPointerGestures(t *testing.T) {
 
 func TestCanvasHeaderTabsSwitchMode(t *testing.T) {
 	u := newTestUI()
+	u.enterOffline()
 	u.rawImage = image.NewNRGBA(image.Rect(0, 0, 120, 160))
 	u.crop = panel.NewCrop(u.rawImage.Bounds())
 	u.preview = image.NewNRGBA(image.Rect(0, 0, panel.Width, panel.Height))
@@ -205,6 +206,7 @@ func TestOpenButtonReceivesClick(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
 				u := newTestUI()
+				u.enterOffline()
 				u.rawImage = image.NewNRGBA(image.Rect(0, 0, 120, 160))
 				u.crop = panel.NewCrop(u.rawImage.Bounds())
 				u.mode = tc.mode

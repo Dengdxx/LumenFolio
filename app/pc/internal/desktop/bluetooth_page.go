@@ -125,12 +125,24 @@ func (u *ui) applyBluetooth(result bluetoothResult) {
 	}
 	if pending != nil {
 		u.setSession(pending)
+		u.rememberFrame(result.id, "")
+		u.entry = entryBluetooth
 		u.checkUploadStorage(storageProbeDelay)
 		p.status = "已连接 " + pending.Name()
 		if result.id != "" {
 			p.status += " · " + string(result.id)
 		}
 		return
+	}
+	if !u.inWorkspace() && len(result.devices) == 1 {
+		u.connectBluetooth(result.devices[0])
+		return
+	}
+	if !u.inWorkspace() {
+		u.connect.status = "找到多台相框，请选择一台。"
+		if len(result.devices) == 0 {
+			u.connect.status = "没有找到相框。长按 KEY3 约两秒后再试。"
+		}
 	}
 	p.devices = result.devices
 	p.buttons = make([]widget.Clickable, len(p.devices))

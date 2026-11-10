@@ -215,7 +215,6 @@ func (u *ui) postUpload(ctx context.Context, update uploadUpdate) {
 }
 
 func (u *ui) uploadLayout(gtx layout.Context) layout.Dimensions {
-	u.syncWiFiSession()
 	p := &u.upload
 	status, detect := "上传位置", "检测"
 	switch {

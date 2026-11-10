@@ -104,6 +104,8 @@ type ui struct {
 	ota        otaPage
 	bluetooth  bluetoothPage
 	remembered rememberedFrame
+	connect    connectPage
+	entry      entryMode
 
 	// session 是当前相框会话；为空即未连接。取景、图库和固件都从它发起操作。
 	session     *frameclient.Frame
@@ -157,6 +159,7 @@ func newUI(shaper *text.Shaper, initialFile string) *ui {
 		gallery:   galleryBrowser{results: make(chan galleryResult, 1)},
 		ota:       otaPage{updates: make(chan otaUpdate, 1)},
 		bluetooth: bluetoothPage{results: make(chan bluetoothResult, 1)},
+		connect:   connectPage{results: make(chan connectResult, 1)},
 	}
 	ui.hostEditor.SingleLine = true
 	ui.remembered = loadRememberedFrame()
@@ -278,6 +281,9 @@ func (u *ui) applyPendingResults() (changed bool) {
 			changed = true
 		case result := <-u.bluetooth.results:
 			u.applyBluetooth(result)
+			changed = true
+		case result := <-u.connect.results:
+			u.applyConnect(result)
 			changed = true
 		default:
 			return changed

@@ -87,18 +87,24 @@ internal fun FrameUploadScreen(model: FrameUploadViewModel) {
     }
 
     var page by rememberSaveable { mutableStateOf(FramePage.EDITOR) }
-    var showingBluetooth by rememberSaveable { mutableStateOf(false) }
-    val openBluetooth = { showingBluetooth = true }
     val editorScroll = rememberScrollState()
-    BackHandler(enabled = page != FramePage.EDITOR) {
-        if (!model.busy) page = FramePage.EDITOR
+    BackHandler(enabled = model.entry != EntryMode.GATE && !model.busy) {
+        if (page != FramePage.EDITOR) page = FramePage.EDITOR else model.returnToGate()
+    }
+    if (model.entry == EntryMode.GATE) {
+        ConnectScreen(model, Modifier.fillMaxSize())
+        return
     }
 
     Scaffold(
         topBar = {
-            LumenFolioTopBar(page != FramePage.EDITOR, !model.busy) {
-                page = if (page == FramePage.EDITOR) FramePage.PICTURES else FramePage.EDITOR
-            }
+            LumenFolioTopBar(
+                showingDevicePage = page != FramePage.EDITOR,
+                enabled = !model.busy,
+                offline = model.entry == EntryMode.OFFLINE,
+                onSwitch = { page = if (page == FramePage.EDITOR) FramePage.PICTURES else FramePage.EDITOR },
+                onLeave = { page = FramePage.EDITOR; model.returnToGate() },
+            )
         },
     ) { insets ->
         val contentModifier = Modifier
@@ -117,10 +123,10 @@ internal fun FrameUploadScreen(model: FrameUploadViewModel) {
                 onAddressChange = model::editAddress,
                 onConnected = model::rememberConnection,
                 onIdentity = model::confirmWiFiIdentity,
-                onBluetooth = openBluetooth,
+                onBluetooth = {},
                 modifier = contentModifier,
             )
-            FramePage.FIRMWARE -> FirmwareUpgradeScreen(model, openBluetooth, contentModifier)
+            FramePage.FIRMWARE -> FirmwareUpgradeScreen(model, {}, contentModifier)
             FramePage.EDITOR -> Box(
                 modifier = contentModifier
                     .verticalScroll(editorScroll)
@@ -136,22 +142,21 @@ internal fun FrameUploadScreen(model: FrameUploadViewModel) {
                         model,
                         onExport = { export.launch("frame.bin") },
                         onUpgrade = { page = FramePage.FIRMWARE },
-                        onBluetooth = openBluetooth,
                     )
                 }
             }
         }
     }
-    if (showingBluetooth) {
-        FrameBluetoothDialog(model) {
-            showingBluetooth = false
-            model.clearBluetoothError()
-        }
-    }
 }
 
 @Composable
-private fun LumenFolioTopBar(showingDevicePage: Boolean, enabled: Boolean, onSwitch: () -> Unit) {
+private fun LumenFolioTopBar(
+    showingDevicePage: Boolean,
+    enabled: Boolean,
+    offline: Boolean,
+    onSwitch: () -> Unit,
+    onLeave: () -> Unit,
+) {
     val colors = MaterialTheme.colorScheme
     Surface(color = colors.surface) {
         Column {
@@ -182,8 +187,13 @@ private fun LumenFolioTopBar(showingDevicePage: Boolean, enabled: Boolean, onSwi
                     contentScale = ContentScale.Fit,
                     colorFilter = ColorFilter.tint(colors.onSurface),
                 )
-                TextButton(onClick = onSwitch, enabled = enabled) {
-                    Text(if (showingDevicePage) "返回取景" else "相框图片")
+                if (!offline) {
+                    TextButton(onClick = onSwitch, enabled = enabled) {
+                        Text(if (showingDevicePage) "返回取景" else "相框图片")
+                    }
+                }
+                TextButton(onClick = onLeave, enabled = enabled) {
+                    Text("更换连接")
                 }
             }
             HorizontalDivider(color = colors.outlineVariant)
@@ -316,7 +326,6 @@ private fun FrameUploadPanel(
     model: FrameUploadViewModel,
     onExport: () -> Unit,
     onUpgrade: () -> Unit,
-    onBluetooth: () -> Unit,
 ) {
     val colors = MaterialTheme.colorScheme
     val focusManager = LocalFocusManager.current
@@ -336,24 +345,17 @@ private fun FrameUploadPanel(
             Text("上传与导出", Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
             UploadStatusBadge(model.sending, progress?.stage, reply)
         }
+        val online = model.entry != EntryMode.OFFLINE
         Text(
-            "使用同一局域网或蓝牙连接相框。相框休眠时，先按机身键唤醒。",
+            if (online) "已连接相框。更换连接方式请回到开屏。" else "离线使用。可以取景、预览和导出，不能上传或访问相框。",
             color = colors.onSurfaceVariant,
             style = MaterialTheme.typography.bodyMedium,
-        )
-        FrameConnectionField(
-            address = model.address,
-            bluetooth = model.bluetooth,
-            identity = model.frameIdentity,
-            onAddressChange = model::editAddress,
-            onBluetooth = onBluetooth,
-            enabled = !model.busy,
         )
         model.identityNotice?.let {
             Text(it, color = colors.error, style = MaterialTheme.typography.bodySmall)
         }
-        Text("存储位置", style = MaterialTheme.typography.labelLarge)
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        if (online) Text("存储位置", style = MaterialTheme.typography.labelLarge)
+        if (online) Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             for (destination in FrameDestination.entries) {
                 FilterChip(
                     selected = model.uploadDestination == destination,
@@ -363,14 +365,14 @@ private fun FrameUploadPanel(
                 )
             }
         }
-        if (connected && model.uploadDestination == null) {
+        if (online && connected && model.uploadDestination == null) {
             Text(
                 "正在检测 SD 卡，也可以直接选择存储位置。",
                 color = colors.onSurfaceVariant,
                 style = MaterialTheme.typography.bodySmall,
             )
         }
-        Button(
+        if (online) Button(
             onClick = {
                 focusManager.clearFocus()
                 model.sendPicture()
@@ -412,7 +414,7 @@ private fun FrameUploadPanel(
         ) {
             Text("导出帧文件")
         }
-        OutlinedButton(
+        if (online) OutlinedButton(
             onClick = {
                 focusManager.clearFocus()
                 onUpgrade()

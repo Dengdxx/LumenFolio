@@ -46,6 +46,9 @@ internal data class EditorPicture(
     val name: String,
 )
 
+/** 开屏之后的工作区。没有进入时停在连接页。 */
+internal enum class EntryMode { GATE, WIFI, BLUETOOTH, OFFLINE }
+
 internal enum class FrameDestination(val source: String, val label: String) {
     SD("sd", "SD 卡"),
     FLASH("artifacts", "Flash artifacts"),
@@ -89,6 +92,8 @@ internal class FrameUploadViewModel(application: Application) : AndroidViewModel
      */
     var session by mutableStateOf<DeviceSession?>(null, referentialEqualityPolicy())
         private set
+    var entry by mutableStateOf(EntryMode.GATE)
+        private set
 
     /** 会话对应的目标，用于判断地址变化后是否需要重建。 */
     private var sessionTarget = ""
@@ -114,10 +119,6 @@ internal class FrameUploadViewModel(application: Application) : AndroidViewModel
     var firmwareFeedback by mutableStateOf<FirmwareFeedback?>(null)
         private set
 
-    init {
-        // 手填地址的会话只在本地解析，不访问网络；连接失败留给首次请求报告。
-        openWiFiSession(address)
-    }
 
     private data class RenderCache(
         val editor: EditorPicture,
@@ -203,32 +204,9 @@ internal class FrameUploadViewModel(application: Application) : AndroidViewModel
     }
 
     fun editAddress(value: String) {
-        if (busy) return
-        if (address.trim() != value.trim()) {
-            // 地址一变就换掉旧会话，避免后续操作继续打到上一台相框。
-            if (bluetooth == null) openWiFiSession(value)
-            resetUploadDestination()
-        }
+        if (busy || entry != EntryMode.GATE) return
         address = value
-        reply = null
-    }
-
-    /**
-     * 手填地址的会话只在本地解析，不访问网络。地址不完整时留空，
-     * 真正发起操作时由会话返回同一个错误。
-     */
-    private fun openWiFiSession(target: String) {
-        if (bluetooth != null) return
-        val trimmed = target.trim()
-        if (trimmed == sessionTarget && session != null) return
-        closeSession()
-        if (trimmed.isEmpty()) return
-        session = try {
-            Mobilepanel.connectWiFi(trimmed)
-        } catch (_: Exception) {
-            null
-        }
-        sessionTarget = trimmed
+        identityNotice = null
     }
 
     /** 关掉当前会话并清空槽位；会话关闭后可重复调用。 */
@@ -236,6 +214,22 @@ internal class FrameUploadViewModel(application: Application) : AndroidViewModel
         session?.close()
         session = null
         sessionTarget = ""
+    }
+
+    /** 离线不建会话。取景、预览和导出可用，上传与相框操作不出现。 */
+    fun enterOffline() {
+        if (busy) return
+        closeSession()
+        bluetooth = null
+        entry = EntryMode.OFFLINE
+    }
+
+    /** 关闭当前会话并回到开屏。已记住的地址保留，但不会自动重连。 */
+    fun returnToGate() {
+        if (busy) return
+        closeSession()
+        bluetooth = null
+        entry = EntryMode.GATE
     }
 
     /** 先用新会话替换旧会话，保证切换过程中始终有一个可用句柄。 */
@@ -274,6 +268,7 @@ internal class FrameUploadViewModel(application: Application) : AndroidViewModel
                 opened = connected
                 installSession(connected, frame.address)
                 bluetooth = FrameBluetoothSelection(frame.name, frame.address)
+                entry = EntryMode.BLUETOOTH
                 resetUploadDestination()
             } finally {
                 opened?.takeIf { it !== session }?.close()
@@ -283,12 +278,30 @@ internal class FrameUploadViewModel(application: Application) : AndroidViewModel
     }
 
     fun disconnectBluetooth() {
-        if (busy) return
-        closeSession()
-        bluetooth = null
-        openWiFiSession(address)
-        resetUploadDestination()
-        reply = null
+        returnToGate()
+    }
+
+    /** 探到相框才进入工作区。探不到时留在开屏，不留下半开的会话。 */
+    fun connectTypedWiFi() {
+        if (busy || entry != EntryMode.GATE) return
+        val target = address.trim()
+        runOperation(failure = "没有连上相框", onFailure = { identityNotice = it }) {
+            val device = withContext(Dispatchers.IO) {
+                val opened = Mobilepanel.connectWiFi(target)
+                try {
+                    opened.status()
+                    confirmFrameIdentity(opened.id(), frameIdentity)
+                } catch (error: Exception) {
+                    opened.close()
+                    throw error
+                }
+                opened
+            }
+            installSession(device, target)
+            entry = EntryMode.WIFI
+            identityNotice = null
+            rememberConnection(device)
+        }
     }
 
     override fun onCleared() {

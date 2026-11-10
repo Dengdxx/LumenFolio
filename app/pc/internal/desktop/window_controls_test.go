@@ -12,6 +12,7 @@ import (
 
 func TestOTAPageCenteredWithWindowControls(t *testing.T) {
 	u := newTestUI()
+	u.enterOffline()
 	u.ota.open = true
 	var router input.Router
 	var ops op.Ops

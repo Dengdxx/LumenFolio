@@ -27,6 +27,9 @@ func (u *ui) layout(gtx layout.Context) layout.Dimensions {
 }
 
 func (u *ui) pageLayout(gtx layout.Context) layout.Dimensions {
+	if !u.inWorkspace() {
+		return u.connectLayout(gtx)
+	}
 	if u.gallery.open {
 		return u.galleryLayout(gtx)
 	}
@@ -61,24 +64,20 @@ func (u *ui) sidebar(gtx layout.Context) layout.Dimensions {
 			layout.Rigid(gap(6)),
 			layout.Rigid(u.swatches),
 			layout.Rigid(gap(14)),
+			layout.Rigid(u.entryBar),
+			layout.Rigid(gap(8)),
 			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-				label := "相框 IP 或主机名"
-				if u.bluetoothConnected() {
-					label = "相框连接"
+				if u.entry == entryOffline {
+					return layout.Dimensions{}
 				}
-				return layout.Flex{Alignment: layout.Middle, Spacing: layout.SpaceBetween}.Layout(gtx,
-					layout.Rigid(u.section(label)),
-					layout.Rigid(u.uploadChoice("蓝牙", &u.bluetooth.openButton, u.bluetoothConnected(), !u.fileBusy, u.openBluetooth)),
+				return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+					layout.Rigid(u.button("查看相框图片", &u.gallery.openButton, u.openGallery)),
+					layout.Rigid(gap(8)),
+					layout.Rigid(u.button("固件升级", &u.ota.openButton, u.openOTA)),
+					layout.Rigid(gap(8)),
+					layout.Rigid(u.uploadLayout),
 				)
 			}),
-			layout.Rigid(gap(6)),
-			layout.Rigid(u.hostField),
-			layout.Rigid(gap(8)),
-			layout.Rigid(u.button("查看相框图片", &u.gallery.openButton, u.openGallery)),
-			layout.Rigid(gap(8)),
-			layout.Rigid(u.button("固件升级", &u.ota.openButton, u.openOTA)),
-			layout.Rigid(gap(8)),
-			layout.Rigid(u.uploadLayout),
 			layout.Rigid(gap(8)),
 			layout.Rigid(u.button("导出帧文件", &u.exportButton, u.onExport)),
 		)
