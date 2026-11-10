@@ -190,7 +190,7 @@ static esp_err_t upload(httpd_req_t *request)
     }
     httpd_resp_set_status(request, "202 Accepted");
     httpd_resp_set_hdr(request, "Connection", "close");
-    // 一秒后后台重启，即使这份最终答复丢失，地面站也可重连读取实际状态。
+    // 一秒后后台重启，即使这份最终答复丢失，OTA 客户端也可重连读取实际状态。
     return sendStatus(request);
 }
 
@@ -251,7 +251,7 @@ esp_err_t otaServiceStart(void)
     config.max_open_sockets = 3;
     // OTA 自己用掉 3 条路由，再留 10 条给设备控制类接口（屏幕刷新、翻页、深睡等）。
     config.max_uri_handlers = 13;
-    /* 空闲连接可由新连接回收，避免地面站断线后端口被长期占用。 */
+    /* 空闲连接可由新连接回收，避免 OTA 客户端断线后端口被长期占用。 */
     config.lru_purge_enable = true;
     esp_err_t error = httpd_start(&server, &config);
     if (error != ESP_OK) return error;
