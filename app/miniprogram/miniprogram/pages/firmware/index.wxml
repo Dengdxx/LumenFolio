@@ -1,0 +1,22 @@
+<view class="page stack">
+  <view class="bar"><brand-mark size="bar" /></view>
+  <view class="card stack">
+    <view class="title">固件升级</view>
+    <view class="muted">云端保存 LumenFolio.bin。相框重启后，小程序会继续确认新固件。</view>
+    <view class="muted" wx:if="{{cloud}}">{{cloud}}</view>
+  </view>
+
+  <button class="quiet" wx:for="{{files}}" wx:key="fileID" data-id="{{item.fileID}}" bindtap="chooseCloud" disabled="{{busy}}">
+    {{item.name}} · {{item.sizeText}}
+  </button>
+  <button class="quiet" bindtap="chooseLocal" disabled="{{busy}}">从手机文件选择</button>
+
+  <view class="card stack" wx:if="{{selected}}">
+    <view>{{selected}}</view>
+    <view class="muted">版本 {{version}}</view>
+    <button class="primary" bindtap="confirmUpgrade" disabled="{{busy}}">{{busy ? '正在升级…' : '开始升级'}}</button>
+  </view>
+
+  <view class="muted" wx:if="{{progress}}">{{progress}}</view>
+  <view class="error" wx:if="{{error}}">{{error}}</view>
+</view>

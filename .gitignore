@@ -28,6 +28,9 @@ app/pc/*.ps1
 # 编辑器/语言服务缓存
 .cache/
 
+# 微信开发者工具的本机配置
+app/miniprogram/project.private.config.json
+
 # 本地烧录辅助脚本和日志，每次重新生成
 tools/_idf_cmd.bat
 tools/_run_idf.py

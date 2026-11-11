@@ -1,0 +1,4 @@
+<view class="brand {{size}}">
+  <image class="icon" src="/images/icon.png" mode="aspectFit" />
+  <image class="word" src="/images/wordmark.png" mode="aspectFit" />
+</view>

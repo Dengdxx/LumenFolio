@@ -1,0 +1,24 @@
+<view class="page stack">
+  <view class="card stack">
+    <brand-mark size="hero" />
+    <view class="muted">先选择一种方式。记住的地址不会自动连接。</view>
+  </view>
+
+  <button class="quiet" data-step="wifi" bindtap="choose" disabled="{{busy}}">Wi-Fi</button>
+  <button class="quiet" data-step="bluetooth" bindtap="choose" disabled="{{busy}}">蓝牙</button>
+  <button class="quiet" bindtap="enterOffline" disabled="{{busy}}">离线</button>
+
+  <view class="card stack" wx:if="{{step === 'wifi'}}">
+    <input class="field" value="{{address}}" placeholder="相框 IP 或主机名" bindinput="editAddress" disabled="{{busy}}" />
+    <view class="muted">端口 8080。手机和相框要在同一个局域网。</view>
+    <button class="primary" bindtap="connectWifi" disabled="{{busy || !address}}">{{busy ? '正在连接…' : '连接'}}</button>
+  </view>
+
+  <view class="card stack" wx:if="{{step === 'bluetooth'}}">
+    <view class="muted">{{message}}</view>
+    <button wx:if="{{devices.length > 1}}" wx:for="{{devices}}" wx:key="deviceId" class="quiet" data-id="{{item.deviceId}}" bindtap="connectSelected" disabled="{{busy}}">{{item.name}}</button>
+    <button class="quiet" bindtap="refresh" disabled="{{busy}}">重新查找</button>
+  </view>
+
+  <view class="error" wx:if="{{error}}">{{error}}</view>
+</view>

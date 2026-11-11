@@ -1,0 +1,30 @@
+<view class="page stack">
+  <view class="bar"><brand-mark size="bar" /></view>
+  <view class="card stack">
+    <view class="muted">Flash {{flash}}</view>
+    <view class="muted">SD 卡 {{sd}}</view>
+    <view class="muted" wx:if="{{status}}">{{status}}</view>
+  </view>
+
+  <view class="actions">
+    <button class="{{source === 'artifacts' ? 'primary' : 'quiet'}}" data-source="artifacts" bindtap="switchSource">Flash</button>
+    <button class="{{source === 'sd' ? 'primary' : 'quiet'}}" data-source="sd" bindtap="switchSource">SD 卡</button>
+    <button class="quiet" bindtap="refresh" disabled="{{busy}}">刷新</button>
+  </view>
+
+  <view class="card picture" wx:for="{{pictures}}" wx:key="id" data-id="{{item.id}}" bindtap="openPicture">
+    <view>{{item.name}}</view>
+    <view class="muted" wx:if="{{selected === item.id}}">当前选择</view>
+  </view>
+  <view class="muted" wx:if="{{!pictures.length && !busy}}">这里还没有图片</view>
+  <button wx:if="{{next}}" class="quiet" bindtap="more" disabled="{{busy}}">继续加载</button>
+
+  <view class="card stack" wx:if="{{selected}}">
+    <image wx:if="{{preview}}" class="preview" src="{{preview}}" mode="aspectFit"></image>
+    <view class="actions">
+      <button class="primary" bindtap="display" disabled="{{busy}}">在相框上显示</button>
+      <button class="quiet" bindtap="remove" disabled="{{busy}}">删除</button>
+    </view>
+  </view>
+  <view class="error" wx:if="{{error}}">{{error}}</view>
+</view>

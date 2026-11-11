@@ -1,0 +1,30 @@
+{
+  "pages": [
+    "pages/connect/index",
+    "pages/compose/index",
+    "pages/gallery/index",
+    "pages/firmware/index"
+  ],
+  "window": {
+    "navigationBarBackgroundColor": "#F7F6F0",
+    "navigationBarTextStyle": "black",
+    "navigationBarTitleText": "LumenFolio",
+    "backgroundColor": "#F7F6F0",
+    "backgroundTextStyle": "dark"
+  },
+  "darkmode": true,
+  "themeLocation": "theme.json",
+  "style": "v2",
+  "lazyCodeLoading": "requiredComponents",
+  "usingComponents": {
+    "brand-mark": "/components/brand/index"
+  },
+  "permission": {
+    "scope.bluetooth": {
+      "desc": "用于连接正在广播的 LumenFolio 相框"
+    },
+    "scope.userLocation": {
+      "desc": "Android 发现蓝牙设备需要定位权限"
+    }
+  }
+}

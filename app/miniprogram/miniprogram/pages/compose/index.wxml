@@ -1,0 +1,66 @@
+<scroll-view class="scroller" scroll-y>
+<view class="page stack">
+  <view class="bar">
+    <brand-mark size="bar" />
+    <button class="link" bindtap="openGallery" wx:if="{{connected}}">相框图片</button>
+    <button class="link" bindtap="changeConnection">更换连接</button>
+  </view>
+
+  <view class="card stack">
+    <view class="heading">照片取景</view>
+    <view class="muted">1200 × 1600 · 六色 · {{label}}</view>
+    <button class="quiet" bindtap="choosePicture" disabled="{{busy}}">打开图片</button>
+
+    <block wx:if="{{picture}}">
+      <view class="row">
+        <button class="chip {{previewMode ? '' : 'selected'}}" data-mode="crop" bindtap="setMode">取景</button>
+        <button class="chip {{previewMode ? 'selected' : ''}}" data-mode="preview" bindtap="setMode">六色预览</button>
+      </view>
+
+      <view class="viewport">
+        <canvas type="2d" id="viewport" class="viewport-canvas" disable-scroll="{{!previewMode}}" bindtouchstart="touchStart" bindtouchmove="touchMove" bindtouchend="touchEnd" bindtouchcancel="touchEnd"></canvas>
+        <view class="veil" wx:if="{{previewing}}">正在生成六色预览…</view>
+      </view>
+
+      <view class="muted" wx:if="{{!previewMode}}">拖动平移，双指缩放或旋转。</view>
+      <view class="row" wx:if="{{!previewMode}}">
+        <button class="quiet grow" data-turn="-90" bindtap="rotate" disabled="{{busy}}">−90°</button>
+        <button class="quiet grow" data-turn="90" bindtap="rotate" disabled="{{busy}}">+90°</button>
+        <button class="quiet grow" bindtap="reset" disabled="{{busy}}">复位</button>
+      </view>
+
+      <view class="muted">抖动算法</view>
+      <picker mode="selector" range="{{algorithms}}" value="{{algorithm}}" bindchange="selectAlgorithm" disabled="{{busy}}">
+        <button class="quiet">{{algorithms[algorithm]}} ▾</button>
+      </picker>
+      <view class="inks">
+        <view class="ink" wx:for="{{inks}}" wx:key="name">
+          <view class="dot" style="background: {{item.color}};"></view>
+          <text>{{item.name}}</text>
+        </view>
+      </view>
+    </block>
+  </view>
+
+  <view class="card stack">
+    <view class="row">
+      <view class="heading grow">上传与导出</view>
+      <view class="badge">{{connected ? '已连接' : '离线'}}</view>
+    </view>
+    <view class="muted">{{connected ? '已连接相框。更换连接方式请回到开屏。' : '离线使用。可以取景和预览，不能上传或访问相框。'}}</view>
+    <block wx:if="{{connected}}">
+      <view class="muted">存储位置</view>
+      <view class="row">
+        <button class="chip {{target === 'artifacts' ? 'selected' : ''}}" data-target="artifacts" bindtap="chooseTarget">Flash</button>
+        <button class="chip {{target === 'sd' ? 'selected' : ''}}" data-target="sd" bindtap="chooseTarget" disabled="{{!sdMounted}}">SD 卡</button>
+      </view>
+      <button class="primary" bindtap="upload" disabled="{{busy || !picture}}">{{busy ? '正在处理…' : '上传到相框'}}</button>
+      <progress wx:if="{{percent >= 0}}" percent="{{percent}}" activeColor="#d07044" stroke-width="4" border-radius="4" />
+    </block>
+    <view class="muted" wx:if="{{progress}}">{{progress}}</view>
+    <view class="error" wx:if="{{error}}">{{error}}</view>
+    <button class="quiet" wx:if="{{connected}}" bindtap="openFirmware" disabled="{{busy}}">固件升级</button>
+  </view>
+
+</view>
+</scroll-view>

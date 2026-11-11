@@ -1,0 +1,49 @@
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 20rpx;
+  min-width: 0;
+}
+
+.icon {
+  flex: none;
+  background: #f7f3ea;
+  border-radius: 16rpx;
+}
+
+.word {
+  min-width: 0;
+}
+
+.bar .icon {
+  width: 60rpx;
+  height: 60rpx;
+  padding: 6rpx;
+}
+
+.bar .word {
+  width: 280rpx;
+  height: 48rpx;
+}
+
+.hero {
+  gap: 28rpx;
+}
+
+.hero .icon {
+  width: 128rpx;
+  height: 128rpx;
+  padding: 8rpx;
+  border-radius: 28rpx;
+}
+
+.hero .word {
+  flex: 1;
+  height: 96rpx;
+}
+
+@media (prefers-color-scheme: dark) {
+  .word {
+    filter: invert(1);
+  }
+}
