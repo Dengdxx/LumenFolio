@@ -52,7 +52,7 @@
       <view class="viewport-wrap">
         <view class="viewport">
           <canvas type="2d" id="viewport" class="viewport-canvas" disable-scroll="{{!previewMode}}" bindtouchstart="touchStart" bindtouchmove="touchMove" bindtouchend="touchEnd" bindtouchcancel="touchEnd"></canvas>
-          <cover-view class="veil" wx:if="{{previewing}}">正在生成 1200×1600 六色预览…</cover-view>
+          <cover-view class="veil" wx:if="{{previewing}}">正在生成六色预览…</cover-view>
         </view>
       </view>
 
