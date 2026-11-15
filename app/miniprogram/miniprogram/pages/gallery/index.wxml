@@ -13,7 +13,7 @@
   </view>
 
   <view class="panel-card empty-card" wx:if="{{!connected}}">
-    <view class="line-icon icon-wifi"></view>
+    <view class="line-icon icon-sparkles"></view>
     <view class="heading">尚未连接相框</view>
     <view class="muted">先通过 Wi-Fi 或蓝牙连接相框，即可查看 Flash、SD 卡容量与设备画面。</view>
     <button class="primary" bindtap="goConnect">前往连接相框</button>
