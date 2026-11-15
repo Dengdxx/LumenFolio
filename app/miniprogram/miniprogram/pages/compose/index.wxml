@@ -1,66 +1,172 @@
-<scroll-view class="scroller" scroll-y>
 <view class="page stack">
-  <view class="bar">
+  <view class="top-bar">
     <brand-mark size="bar" />
-    <button class="link" bindtap="openGallery" wx:if="{{connected}}">相框图片</button>
-    <button class="link" bindtap="changeConnection">更换连接</button>
+    <view class="top-actions">
+      <button class="pill-action blue" bindtap="openGallery" wx:if="{{connected}}">图库</button>
+      <button class="pill-action" bindtap="changeConnection">更换连接</button>
+    </view>
   </view>
 
-  <view class="card stack">
-    <view class="heading">照片取景</view>
-    <view class="muted">1200 × 1600 · 六色 · {{label}}</view>
-    <button class="quiet" bindtap="choosePicture" disabled="{{busy}}">打开图片</button>
+  <view class="hero-header">
+    <view class="grow">
+      <view class="hero-title">画面取景工作台</view>
+      <view class="hero-subtitle">1200 × 1600 · 六色墨水 · {{label}}</view>
+    </view>
+  </view>
 
-    <block wx:if="{{picture}}">
-      <view class="row">
+  <view class="bento-grid">
+    <view class="bento-tile compact tone-mint" hover-class="tap-pressed" hover-stay-time="60" bindtap="choosePicture">
+      <view class="bento-top">
+        <view class="line-icon icon-folder"></view>
+        <view class="bento-tag">选图</view>
+      </view>
+      <view class="bento-body">
+        <view class="bento-time">{{picture ? '点击更换照片' : '从手机相册选择'}}</view>
+        <view class="bento-name">{{picture ? '更换图片' : '打开图片'}}</view>
+      </view>
+    </view>
+
+    <view class="bento-tile compact {{previewMode ? 'tone-blue' : 'tone-yellow'}}" hover-class="tap-pressed" hover-stay-time="60" bindtap="toggleMode">
+      <view class="bento-top">
+        <view class="line-icon icon-palette"></view>
+        <view class="bento-tag">视图</view>
+      </view>
+      <view class="bento-body">
+        <view class="bento-time">{{picture ? '点击切换画布模式' : '载入后可预览'}}</view>
+        <view class="bento-name">{{previewMode ? '六色预览' : '取景构图'}}</view>
+      </view>
+    </view>
+  </view>
+
+  <view class="panel-card canvas-card stack">
+    <view class="row-between">
+      <view class="heading">3 : 4 相框画幅</view>
+      <view class="row" wx:if="{{picture}}">
         <button class="chip {{previewMode ? '' : 'selected'}}" data-mode="crop" bindtap="setMode">取景</button>
         <button class="chip {{previewMode ? 'selected' : ''}}" data-mode="preview" bindtap="setMode">六色预览</button>
       </view>
+      <view class="badge" wx:else>等待选图</view>
+    </view>
 
-      <view class="viewport">
-        <canvas type="2d" id="viewport" class="viewport-canvas" disable-scroll="{{!previewMode}}" bindtouchstart="touchStart" bindtouchmove="touchMove" bindtouchend="touchEnd" bindtouchcancel="touchEnd"></canvas>
-        <view class="veil" wx:if="{{previewing}}">正在生成六色预览…</view>
+    <block wx:if="{{picture}}">
+      <view class="viewport-wrap">
+        <view class="viewport">
+          <canvas type="2d" id="viewport" class="viewport-canvas" disable-scroll="{{!previewMode}}" bindtouchstart="touchStart" bindtouchmove="touchMove" bindtouchend="touchEnd" bindtouchcancel="touchEnd"></canvas>
+          <cover-view class="veil" wx:if="{{previewing}}">正在生成 1200×1600 六色预览…</cover-view>
+        </view>
       </view>
 
-      <view class="muted" wx:if="{{!previewMode}}">拖动平移，双指缩放或旋转。</view>
-      <view class="row" wx:if="{{!previewMode}}">
-        <button class="quiet grow" data-turn="-90" bindtap="rotate" disabled="{{busy}}">−90°</button>
-        <button class="quiet grow" data-turn="90" bindtap="rotate" disabled="{{busy}}">+90°</button>
-        <button class="quiet grow" bindtap="reset" disabled="{{busy}}">复位</button>
+      <view class="muted" wx:if="{{!previewMode}}">单指拖动平移，双指缩放或任意角度旋转。</view>
+      <view class="tool-grid" wx:if="{{!previewMode}}">
+        <button class="tool-btn tone-blue" data-turn="-90" bindtap="rotate" disabled="{{busy}}">−90°</button>
+        <button class="tool-btn tone-yellow" data-turn="90" bindtap="rotate" disabled="{{busy}}">+90°</button>
+        <button class="tool-btn tone-coral" bindtap="reset" disabled="{{busy}}">复位</button>
       </view>
 
-      <view class="muted">抖动算法</view>
       <picker mode="selector" range="{{algorithms}}" value="{{algorithm}}" bindchange="selectAlgorithm" disabled="{{busy}}">
-        <button class="quiet">{{algorithms[algorithm]}} ▾</button>
+        <view class="task-bar tone-yellow">
+          <view class="check-circle solid">
+            <view class="line-icon sm icon-palette"></view>
+          </view>
+          <view class="task-content">
+            <view class="task-meta">六色抖动算法 · 点击切换</view>
+            <view class="task-title">{{algorithms[algorithm]}}</view>
+          </view>
+          <view class="task-pill">切换 ▾</view>
+        </view>
       </picker>
-      <view class="inks">
+
+      <view class="ink-strip">
         <view class="ink" wx:for="{{inks}}" wx:key="name">
           <view class="dot" style="background: {{item.color}};"></view>
           <text>{{item.name}}</text>
         </view>
       </view>
     </block>
-  </view>
 
-  <view class="card stack">
-    <view class="row">
-      <view class="heading grow">上传与导出</view>
-      <view class="badge">{{connected ? '已连接' : '离线'}}</view>
+    <view class="empty-viewport" wx:else hover-class="tap-pressed" hover-stay-time="60" bindtap="choosePicture">
+      <image class="empty-logo only-light" src="/images/icon.png" mode="aspectFit" />
+      <image class="empty-logo only-dark" src="/images/icon-dark.png" mode="aspectFit" />
+      <view class="empty-title">点击载入相册原图</view>
+      <view class="muted">在 1200 × 1600 竖幅相框中自由裁剪与预览六色半色调效果</view>
+      <button class="pill-action mint">选择手机照片</button>
     </view>
-    <view class="muted">{{connected ? '已连接相框。更换连接方式请回到开屏。' : '离线使用。可以取景和预览，不能上传或访问相框。'}}</view>
-    <block wx:if="{{connected}}">
-      <view class="muted">存储位置</view>
-      <view class="row">
-        <button class="chip {{target === 'artifacts' ? 'selected' : ''}}" data-target="artifacts" bindtap="chooseTarget">Flash</button>
-        <button class="chip {{target === 'sd' ? 'selected' : ''}}" data-target="sd" bindtap="chooseTarget" disabled="{{!sdMounted}}">SD 卡</button>
-      </view>
-      <button class="primary" bindtap="upload" disabled="{{busy || !picture}}">{{busy ? '正在处理…' : '上传到相框'}}</button>
-      <progress wx:if="{{percent >= 0}}" percent="{{percent}}" activeColor="#d07044" stroke-width="4" border-radius="4" />
-    </block>
-    <view class="muted" wx:if="{{progress}}">{{progress}}</view>
-    <view class="error" wx:if="{{error}}">{{error}}</view>
-    <button class="quiet" wx:if="{{connected}}" bindtap="openFirmware" disabled="{{busy}}">固件升级</button>
   </view>
 
+  <view class="panel-card stack">
+    <view class="row-between">
+      <view class="heading">上传与存储</view>
+      <view class="badge {{connected ? 'online' : ''}}">{{connected ? '已连接' : '离线模式'}}</view>
+    </view>
+    <view class="muted">{{connected ? '已连接相框，选择目标存储后可一键编码并送屏。' : '当前为离线模式，可完整体验取景与 14 种抖动预览；连接相框后即可上传。'}}</view>
+
+    <block wx:if="{{connected}}">
+      <view class="bento-grid">
+        <view
+          class="bento-tile compact {{target === 'artifacts' ? 'tone-apricot active-tile' : 'tone-paper'}}"
+          hover-class="tap-pressed"
+          hover-stay-time="60"
+          data-target="artifacts"
+          bindtap="chooseTarget"
+        >
+          <view class="bento-top">
+            <view class="line-icon icon-flash"></view>
+            <view class="bento-tag">{{target === 'artifacts' ? '已选' : '槽位'}}</view>
+          </view>
+          <view class="bento-body">
+            <view class="bento-time">板载 1 MB 上传槽</view>
+            <view class="bento-name">Flash</view>
+          </view>
+        </view>
+
+        <view
+          class="bento-tile compact {{target === 'sd' ? 'tone-blue active-tile' : 'tone-paper'}} {{!sdMounted ? 'disabled-tile' : ''}}"
+          hover-class="tap-pressed"
+          hover-stay-time="60"
+          data-target="sd"
+          bindtap="chooseTarget"
+        >
+          <view class="bento-top">
+            <view class="line-icon icon-sd"></view>
+            <view class="bento-tag">{{!sdMounted ? '未挂载' : (target === 'sd' ? '已选' : '可选')}}</view>
+          </view>
+          <view class="bento-body">
+            <view class="bento-time">根目录 .bin 文件</view>
+            <view class="bento-name">SD 卡</view>
+          </view>
+        </view>
+      </view>
+
+      <button class="task-bar tone-mint" bindtap="upload" disabled="{{busy || !picture}}">
+        <view class="check-circle solid">
+          <view class="line-icon sm icon-upload"></view>
+        </view>
+        <view class="task-content">
+          <view class="task-meta">目标：{{target === 'sd' ? 'SD 存储卡' : 'Flash 上传槽'}} · EPD1 编码</view>
+          <view class="task-title">{{busy ? '正在处理…' : '上传到相框'}}</view>
+        </view>
+        <view class="task-pill">送屏</view>
+      </button>
+
+      <view class="progress-shell" wx:if="{{percent >= 0}}">
+        <view class="progress-track">
+          <view class="progress-fill" style="width: {{percent}}%;"></view>
+        </view>
+      </view>
+    </block>
+
+    <view class="notice-banner" wx:if="{{progress}}">{{progress}}</view>
+    <view class="error-banner" wx:if="{{error}}">{{error}}</view>
+
+    <button class="task-bar tone-coral" wx:if="{{connected}}" bindtap="openFirmware" disabled="{{busy}}">
+      <view class="check-circle solid">
+        <view class="line-icon sm icon-sparkles"></view>
+      </view>
+      <view class="task-content">
+        <view class="task-meta">无线 OTA 与版本校验</view>
+        <view class="task-title">固件升级</view>
+      </view>
+      <view class="task-pill">进入 ▸</view>
+    </button>
+  </view>
 </view>
-</scroll-view>

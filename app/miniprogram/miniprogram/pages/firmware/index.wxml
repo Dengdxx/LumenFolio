@@ -1,22 +1,98 @@
 <view class="page stack">
-  <view class="bar"><brand-mark size="bar" /></view>
-  <view class="card stack">
-    <view class="title">固件升级</view>
-    <view class="muted">云端保存 LumenFolio.bin。相框重启后，小程序会继续确认新固件。</view>
-    <view class="muted" wx:if="{{cloud}}">{{cloud}}</view>
+  <view class="top-bar">
+    <brand-mark size="bar" />
+    <button class="pill-action blue" wx:if="{{connected}}" bindtap="loadCloud" disabled="{{busy}}">刷新云端</button>
+    <button class="pill-action mint" wx:else bindtap="goConnect">连接相框</button>
   </view>
 
-  <button class="quiet" wx:for="{{files}}" wx:key="fileID" data-id="{{item.fileID}}" bindtap="chooseCloud" disabled="{{busy}}">
-    {{item.name}} · {{item.sizeText}}
-  </button>
-  <button class="quiet" bindtap="chooseLocal" disabled="{{busy}}">从手机文件选择</button>
-
-  <view class="card stack" wx:if="{{selected}}">
-    <view>{{selected}}</view>
-    <view class="muted">版本 {{version}}</view>
-    <button class="primary" bindtap="confirmUpgrade" disabled="{{busy}}">{{busy ? '正在升级…' : '开始升级'}}</button>
+  <view class="hero-header">
+    <view class="grow">
+      <view class="hero-title">固件升级</view>
+      <view class="hero-subtitle">云端或本地 LumenFolio.bin · 相框重启后自动确认新固件</view>
+    </view>
   </view>
 
-  <view class="muted" wx:if="{{progress}}">{{progress}}</view>
-  <view class="error" wx:if="{{error}}">{{error}}</view>
+  <view class="panel-card empty-card stack" wx:if="{{!connected}}">
+    <view class="line-icon icon-flash"></view>
+    <view class="heading">尚未连接相框</view>
+    <view class="muted">先通过 Wi-Fi 或蓝牙连接相框，即可下载云端或本地固件进行无线 OTA 升级。</view>
+    <button class="primary" bindtap="goConnect">前往连接相框</button>
+  </view>
+
+  <block wx:if="{{connected}}">
+  <view class="bento-grid">
+    <view class="bento-tile compact tone-blue" hover-class="tap-pressed" hover-stay-time="60" bindtap="chooseLocal">
+      <view class="bento-top">
+        <view class="line-icon icon-folder"></view>
+        <view class="bento-tag">本地</view>
+      </view>
+      <view class="bento-body">
+        <view class="bento-time">微信聊天文件</view>
+        <view class="bento-name">从手机文件选择</view>
+      </view>
+    </view>
+
+    <view class="bento-tile compact tone-mint" hover-class="tap-pressed" hover-stay-time="60" bindtap="loadCloud">
+      <view class="bento-top">
+        <view class="line-icon icon-cloud"></view>
+        <view class="bento-tag">云端</view>
+      </view>
+      <view class="bento-body">
+        <view class="bento-time">{{files.length ? '已发现 ' + files.length + ' 个镜像' : '云端发布清单'}}</view>
+        <view class="bento-name">云存储固件</view>
+      </view>
+    </view>
+  </view>
+
+  <view class="panel-card tone-yellow stack" wx:if="{{selected}}">
+    <view class="row-between">
+      <view class="heading">已就绪镜像</view>
+      <view class="badge online">版本 {{version}}</view>
+    </view>
+    <view class="selected-name">{{selected}}</view>
+    <view class="muted">镜像已通过 ESP-IDF 魔数与 LumenFolio 工程名校验。升级期间请保持相框供电并停留在当前页面。</view>
+    <button class="task-bar tone-mint" bindtap="confirmUpgrade" disabled="{{busy}}">
+      <view class="check-circle solid">
+        <view class="line-icon sm icon-check"></view>
+      </view>
+      <view class="task-content">
+        <view class="task-meta">目标版本 {{version}} · 自动回滚保护</view>
+        <view class="task-title">{{busy ? '正在升级…' : '开始升级'}}</view>
+      </view>
+      <view class="task-pill">刷写</view>
+    </button>
+  </view>
+
+  <view class="section-head" wx:if="{{files.length || cloud}}">
+    <view class="section-title">云端固件列表</view>
+    <view class="section-meta">{{files.length}} 项</view>
+  </view>
+
+  <view class="panel-card" wx:if="{{cloud && !files.length}}">
+    <view class="muted">{{cloud}}</view>
+  </view>
+
+  <view class="task-list" wx:if="{{files.length}}">
+    <button
+      class="task-bar {{index % 3 === 0 ? 'tone-mint' : (index % 3 === 1 ? 'tone-yellow' : 'tone-coral')}}"
+      wx:for="{{files}}"
+      wx:key="fileID"
+      data-id="{{item.fileID}}"
+      bindtap="chooseCloud"
+      disabled="{{busy}}"
+    >
+      <view class="check-circle solid">
+        <view class="line-icon sm icon-cloud"></view>
+      </view>
+      <view class="task-content">
+        <view class="task-meta">{{item.sizeText}}{{item.updated ? ' · ' + item.updated : ''}}</view>
+        <view class="task-title">{{item.name}}</view>
+      </view>
+      <view class="task-pill">下载</view>
+    </button>
+  </view>
+
+  <view class="notice-banner" wx:if="{{progress}}">{{progress}}</view>
+  <view class="error-banner" wx:if="{{error}}">{{error}}</view>
+  </block>
 </view>

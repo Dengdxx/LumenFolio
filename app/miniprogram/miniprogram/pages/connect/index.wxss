@@ -1,1 +1,145 @@
-/* 连接页沿用全局样式。 */
+.sheet-mask {
+  position: fixed;
+  left: 0;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  z-index: 900;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  background: rgba(22, 22, 22, 0.45);
+  animation: maskFade 0.18s ease-out both;
+}
+
+.sheet-panel {
+  box-sizing: border-box;
+  width: 100%;
+  max-height: 1240rpx;
+  padding: 18rpx 32rpx 40rpx;
+  border-radius: 36rpx 36rpx 0 0;
+  border-top: 4rpx solid #161616;
+  border-left: 4rpx solid #161616;
+  border-right: 4rpx solid #161616;
+  background: #FFFDF8;
+  box-shadow: 0 -8rpx 28rpx rgba(22, 22, 22, 0.14);
+  animation: sheetUp 0.24s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.sheet-handle {
+  width: 84rpx;
+  height: 10rpx;
+  margin: 0 auto 4rpx;
+  border-radius: 999rpx;
+  background: #161616;
+  opacity: 0.2;
+}
+
+.sheet-list {
+  max-height: 620rpx;
+}
+
+.sheet-target {
+  font-size: 24rpx;
+  font-weight: 700;
+  line-height: 1.4;
+  color: #383633;
+  word-break: break-all;
+}
+
+.sheet-primary {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 14rpx;
+  width: 100% !important;
+  min-height: 112rpx;
+  margin: 10rpx 0 0 !important;
+  padding: 0 32rpx !important;
+  border-radius: 26rpx;
+  border: 4rpx solid #161616;
+  font-size: 34rpx;
+  font-weight: 800;
+  line-height: 1.2;
+  box-shadow: 0 6rpx 0 #161616;
+  transition: transform 0.12s ease, box-shadow 0.12s ease;
+}
+
+.sheet-primary:not([disabled]):active {
+  transform: translateY(4rpx);
+  box-shadow: 0 2rpx 0 #161616;
+}
+
+@keyframes maskFade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes sheetUp {
+  from {
+    transform: translateY(100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+.scan-dot {
+  width: 18rpx;
+  height: 18rpx;
+  border-radius: 50%;
+  border: 3rpx solid #161616;
+  background: #FAE69B;
+  animation: scanPulse 1.3s ease-in-out infinite;
+}
+
+@keyframes scanPulse {
+  0%, 100% {
+    transform: scale(0.9);
+    opacity: 0.7;
+  }
+  50% {
+    transform: scale(1.25);
+    opacity: 1;
+  }
+}
+
+@media (prefers-color-scheme: dark) {
+  .sheet-mask {
+    background: rgba(0, 0, 0, 0.65);
+  }
+
+  .sheet-panel {
+    background: #1B242E;
+    border-color: #F4EEE2;
+  }
+
+  .sheet-handle {
+    background: #F4EEE2;
+    opacity: 0.3;
+  }
+
+  .sheet-target {
+    color: #C7C0B3;
+  }
+
+  .sheet-primary {
+    border-color: #F4EEE2;
+    box-shadow: 0 6rpx 0 #F4EEE2;
+  }
+
+  .sheet-primary:not([disabled]):active {
+    box-shadow: 0 2rpx 0 #F4EEE2;
+  }
+
+  .scan-dot {
+    border-color: #F4EEE2;
+    background: #6B5A22;
+  }
+}

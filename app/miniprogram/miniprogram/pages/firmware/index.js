@@ -4,6 +4,7 @@ const firmwareCloud = require("../../frame/firmware")
 
 Page({
   data: {
+    connected: false,
     files: [],
     selected: "",
     version: "",
@@ -14,11 +15,17 @@ Page({
   },
 
   onShow() {
-    if (!workspace.current()) {
-      wx.redirectTo({ url: "/pages/connect/index" })
+    const session = workspace.current()
+    if (!session) {
+      this.setData({ connected: false, error: "" })
       return
     }
+    this.setData({ connected: true })
     this.loadCloud()
+  },
+
+  goConnect() {
+    wx.switchTab({ url: "/pages/connect/index" })
   },
 
   async loadCloud() {

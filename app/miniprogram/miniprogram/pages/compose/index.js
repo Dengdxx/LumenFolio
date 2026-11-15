@@ -4,8 +4,8 @@ const gesture = require("../../frame/gesture")
 
 const PANEL_WIDTH = dither.PANEL_WIDTH
 const PANEL_HEIGHT = dither.PANEL_HEIGHT
-const PREVIEW_WIDTH = 120
-const PREVIEW_HEIGHT = 160
+const PREVIEW_WIDTH = PANEL_WIDTH
+const PREVIEW_HEIGHT = PANEL_HEIGHT
 const ALGORITHMS = [
   "最近色",
   "Floyd-Steinberg",
@@ -92,8 +92,11 @@ Page({
             }
             this.image = null
             this.sampled = null
-            this.setData({ picture: file.tempFilePath, previewMode: false, previewing: false, error: "", progress: "", percent: -1 })
-            this.paint()
+            this.preview = null
+            this.setData(
+              { picture: file.tempFilePath, previewMode: false, previewing: false, error: "", progress: "", percent: -1 },
+              () => this.paint()
+            )
           },
           fail: () => this.setData({ error: "这张图片无法读取" }),
         })
@@ -103,6 +106,17 @@ Page({
 
   setMode(event) {
     const previewMode = event.currentTarget.dataset.mode === "preview"
+    this.setData({ previewMode, error: "" })
+    if (previewMode) this.makePreview()
+    else this.paint()
+  },
+
+  toggleMode() {
+    if (!this.data.picture) {
+      this.choosePicture()
+      return
+    }
+    const previewMode = !this.data.previewMode
     this.setData({ previewMode, error: "" })
     if (previewMode) this.makePreview()
     else this.paint()
@@ -128,7 +142,9 @@ Page({
   },
 
   chooseTarget(event) {
-    this.setData({ target: event.currentTarget.dataset.target })
+    const target = event.currentTarget.dataset.target
+    if (target === "sd" && !this.data.sdMounted) return
+    this.setData({ target })
   },
 
   touchStart(event) {
@@ -170,16 +186,16 @@ Page({
   },
 
   openGallery() {
-    wx.navigateTo({ url: "/pages/gallery/index" })
+    wx.switchTab({ url: "/pages/gallery/index" })
   },
 
   openFirmware() {
-    wx.navigateTo({ url: "/pages/firmware/index" })
+    wx.switchTab({ url: "/pages/firmware/index" })
   },
 
   changeConnection() {
     workspace.close()
-    wx.redirectTo({ url: "/pages/connect/index" })
+    wx.switchTab({ url: "/pages/connect/index" })
   },
 
   previewKey() {
@@ -192,6 +208,8 @@ Page({
     this.token = token
     this.setData({ previewing: true, error: "" })
     try {
+      await yieldToPage()
+      if (token !== this.token) return
       const key = this.previewKey()
       let pixels = this.sampled && this.sampled.key === key ? this.sampled.pixels : null
       if (!pixels) {
@@ -199,6 +217,8 @@ Page({
         if (token !== this.token) return
         this.sampled = { key, pixels }
       }
+      await yieldToPage()
+      if (token !== this.token) return
       const indices = dither.renderSync(pixels, PREVIEW_WIDTH, PREVIEW_HEIGHT, this.data.algorithm)
       if (token !== this.token) return
       this.preview = { pixels: dither.preview(indices, PREVIEW_WIDTH, PREVIEW_HEIGHT), width: PREVIEW_WIDTH, height: PREVIEW_HEIGHT }
@@ -217,8 +237,13 @@ Page({
     const token = this.token
     this.setData({ busy: true, error: "", progress: "正在采样 1200×1600…", percent: 0 })
     try {
-      const pixels = await this.sample(PANEL_WIDTH, PANEL_HEIGHT)
-      if (token !== this.token) return
+      const key = this.previewKey()
+      let pixels = this.sampled && this.sampled.key === key ? this.sampled.pixels : null
+      if (!pixels) {
+        pixels = await this.sample(PANEL_WIDTH, PANEL_HEIGHT)
+        if (token !== this.token) return
+        this.sampled = { key, pixels }
+      }
       this.setData({ percent: 5, progress: "正在生成六色帧…" })
       await yieldToPage()
       const indices = dither.renderSync(pixels, PANEL_WIDTH, PANEL_HEIGHT, this.data.algorithm)
@@ -261,7 +286,6 @@ Page({
   },
 
   measureViewport() {
-    if (this.viewWidth > 0 && this.viewHeight > 0) return
     wx.createSelectorQuery().in(this).select("#viewport").boundingClientRect((rect) => {
       if (!rect || !(rect.width > 0) || !(rect.height > 0)) return
       this.viewWidth = rect.width
@@ -308,7 +332,7 @@ Page({
   paint() {
     if (!this.data.picture || this.data.previewMode) return
     this.canvas("#viewport").then((canvas) => {
-      const width = Math.max(2, Math.round(canvas._displayWidth || 360))
+      const width = Math.max(2, Math.round((canvas._displayWidth || 360) * 2))
       const height = Math.round(width * 4 / 3)
       return this.draw(canvas, width, height, false)
     }).catch((error) => this.setData({ error: error.message }))

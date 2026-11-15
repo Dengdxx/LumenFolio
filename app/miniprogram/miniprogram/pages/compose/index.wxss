@@ -1,94 +1,219 @@
-.scroller {
-  height: 100vh;
+.canvas-card {
+  animation: fadeOnly 0.22s ease both;
 }
 
-.bar {
-  display: flex;
-  align-items: center;
-  gap: 8rpx;
-  margin: -8rpx 0 8rpx;
-}
-
-.link {
-  width: auto;
-  padding: 0 12rpx;
-  line-height: 64rpx;
-  font-size: 26rpx;
-  color: #8c401d;
-  background: transparent;
+.viewport-wrap {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 720rpx;
+  margin: 0 auto;
+  flex: none;
+  padding: 10rpx;
+  overflow: hidden;
+  border-radius: 26rpx;
+  border: 4rpx solid #161616;
+  background: #FFFDF8;
+  box-shadow: 0 6rpx 0 #161616;
 }
 
 .viewport {
   position: relative;
   width: 100%;
-  max-width: 720rpx;
-  margin: 0 auto;
-  aspect-ratio: 3 / 4;
-  overflow: hidden;
-  border-radius: 16rpx;
+  height: 0;
+  padding-top: 133.3333%;
   background: #ffffff;
 }
 
 .viewport-canvas {
+  position: absolute;
+  left: 0;
+  top: 0;
   width: 100%;
   height: 100%;
+  display: block;
 }
 
 .veil {
   position: absolute;
-  left: 0;
-  right: 0;
+  z-index: 2;
+  left: 24rpx;
+  right: 24rpx;
   bottom: 24rpx;
-  color: #3d3c3a;
-  font-size: 24rpx;
+  padding: 14rpx 24rpx;
+  border-radius: 999rpx;
+  border: 4rpx solid #161616;
+  background-color: #FAE69B;
+  color: #161616;
+  font-size: 25rpx;
+  font-weight: 800;
   text-align: center;
 }
 
-.inks {
+.empty-viewport {
+  box-sizing: border-box;
   display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
   gap: 20rpx;
-  overflow: auto;
+  width: 100%;
+  aspect-ratio: 3 / 4;
+  padding: 48rpx;
+  border-radius: 26rpx;
+  border: 4rpx dashed #161616;
+  background: #F7F5EE;
+  text-align: center;
+}
+
+.empty-logo {
+  width: 156rpx;
+  height: 156rpx;
+  animation: softFloat 3.2s ease-in-out infinite;
+}
+
+@keyframes softFloat {
+  0%, 100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-8rpx);
+  }
+}
+
+.empty-title {
+  font-size: 36rpx;
+  font-weight: 800;
+  color: #161616;
+}
+
+.tool-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16rpx;
+}
+
+.tool-btn {
+  width: 100% !important;
+  margin: 0 !important;
+  border-radius: 22rpx;
+  border: 4rpx solid #161616;
+  font-size: 28rpx;
+  font-weight: 800;
+  line-height: 80rpx;
+}
+
+.ink-strip {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 14rpx;
+  padding: 18rpx 22rpx;
+  border-radius: 22rpx;
+  border: 4rpx solid #161616;
+  background: #F7F5EE;
 }
 
 .ink {
   display: flex;
   align-items: center;
-  gap: 8rpx;
-  color: #3d3c3a;
-  font-size: 22rpx;
+  gap: 10rpx;
+  color: #161616;
+  font-size: 24rpx;
+  font-weight: 800;
   white-space: nowrap;
 }
 
 .dot {
-  width: 24rpx;
-  height: 24rpx;
+  width: 28rpx;
+  height: 28rpx;
   border-radius: 50%;
-  border: 1rpx solid rgba(31, 30, 29, 0.22);
+  border: 3rpx solid #161616;
 }
 
-.badge {
-  padding: 4rpx 16rpx;
+.disabled-tile {
+  opacity: 0.5;
+}
+
+.progress-shell {
+  padding: 10rpx 12rpx;
   border-radius: 999rpx;
-  background: #f4e2d9;
-  color: #8c401d;
-  font-size: 22rpx;
+  border: 4rpx solid #161616;
+  background: #FFFDF8;
+}
+
+.progress-track {
+  width: 100%;
+  height: 18rpx;
+  border-radius: 999rpx;
+  background: #E8E3D5;
+  overflow: hidden;
+}
+
+.progress-fill {
+  height: 100%;
+  border-radius: 999rpx;
+  background: #161616;
+  transition: width 0.15s ease;
+}
+
+.only-dark {
+  display: none;
 }
 
 @media (prefers-color-scheme: dark) {
-  .link {
-    color: #8cc8ff;
+  .only-light {
+    display: none;
   }
 
-  .viewport {
-    background: #2c2c2e;
+  .only-dark {
+    display: block;
   }
 
+  .viewport-wrap {
+    border-color: #F4EEE2;
+    background: #1B242E;
+    box-shadow: 0 6rpx 0 #F4EEE2;
+  }
+
+  .veil {
+    border-color: #F4EEE2;
+    background-color: #6B5A22;
+    color: #F4EEE2;
+  }
+
+  .empty-viewport {
+    border-color: #F4EEE2;
+    background: #151C24;
+  }
+
+  .empty-title,
   .ink {
-    color: #98989d;
+    color: #F4EEE2;
   }
 
-  .badge {
-    background: #12324d;
-    color: #8cc8ff;
+  .tool-btn {
+    border-color: #F4EEE2;
+  }
+
+  .ink-strip {
+    border-color: #F4EEE2;
+    background: #131921;
+  }
+
+  .dot {
+    border-color: #F4EEE2;
+  }
+
+  .progress-shell {
+    border-color: #F4EEE2;
+    background: #1B242E;
+  }
+
+  .progress-track {
+    background: #0C1117;
+  }
+
+  .progress-fill {
+    background: #F4EEE2;
   }
 }

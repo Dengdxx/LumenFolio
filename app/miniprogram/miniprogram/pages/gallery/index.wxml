@@ -1,30 +1,118 @@
 <view class="page stack">
-  <view class="bar"><brand-mark size="bar" /></view>
-  <view class="card stack">
-    <view class="muted">Flash {{flash}}</view>
-    <view class="muted">SD 卡 {{sd}}</view>
-    <view class="muted" wx:if="{{status}}">{{status}}</view>
+  <view class="top-bar">
+    <brand-mark size="bar" />
+    <button class="pill-action yellow" wx:if="{{connected}}" bindtap="refresh" disabled="{{busy}}">刷新</button>
+    <button class="pill-action mint" wx:else bindtap="goConnect">连接相框</button>
   </view>
 
-  <view class="actions">
-    <button class="{{source === 'artifacts' ? 'primary' : 'quiet'}}" data-source="artifacts" bindtap="switchSource">Flash</button>
-    <button class="{{source === 'sd' ? 'primary' : 'quiet'}}" data-source="sd" bindtap="switchSource">SD 卡</button>
-    <button class="quiet" bindtap="refresh" disabled="{{busy}}">刷新</button>
-  </view>
-
-  <view class="card picture" wx:for="{{pictures}}" wx:key="id" data-id="{{item.id}}" bindtap="openPicture">
-    <view>{{item.name}}</view>
-    <view class="muted" wx:if="{{selected === item.id}}">当前选择</view>
-  </view>
-  <view class="muted" wx:if="{{!pictures.length && !busy}}">这里还没有图片</view>
-  <button wx:if="{{next}}" class="quiet" bindtap="more" disabled="{{busy}}">继续加载</button>
-
-  <view class="card stack" wx:if="{{selected}}">
-    <image wx:if="{{preview}}" class="preview" src="{{preview}}" mode="aspectFit"></image>
-    <view class="actions">
-      <button class="primary" bindtap="display" disabled="{{busy}}">在相框上显示</button>
-      <button class="quiet" bindtap="remove" disabled="{{busy}}">删除</button>
+  <view class="hero-header">
+    <view class="grow">
+      <view class="hero-title">相框图库</view>
+      <view class="hero-subtitle">{{status || '浏览与点选 Flash 及 SD 卡中的六色画面'}}</view>
     </view>
   </view>
-  <view class="error" wx:if="{{error}}">{{error}}</view>
+
+  <view class="panel-card empty-card" wx:if="{{!connected}}">
+    <view class="line-icon icon-wifi"></view>
+    <view class="heading">尚未连接相框</view>
+    <view class="muted">先通过 Wi-Fi 或蓝牙连接相框，即可查看 Flash、SD 卡容量与设备画面。</view>
+    <button class="primary" bindtap="goConnect">前往连接相框</button>
+  </view>
+
+  <block wx:if="{{connected}}">
+  <view class="bento-grid">
+    <view
+      class="bento-tile compact tone-mint {{source === 'artifacts' ? 'active-tile' : ''}}"
+      hover-class="tap-pressed"
+      hover-stay-time="60"
+      data-source="artifacts"
+      bindtap="switchSource"
+    >
+      <view class="bento-top">
+        <view class="line-icon icon-flash"></view>
+        <view class="bento-tag">{{source === 'artifacts' ? '当前' : '切换'}}</view>
+      </view>
+      <view class="bento-body">
+        <view class="bento-time">内置存储</view>
+        <view class="bento-name">Flash 空间</view>
+        <view class="bento-sub">{{flash || '读取中…'}}</view>
+      </view>
+    </view>
+
+    <view
+      class="bento-tile compact tone-yellow {{source === 'sd' ? 'active-tile' : ''}}"
+      hover-class="tap-pressed"
+      hover-stay-time="60"
+      data-source="sd"
+      bindtap="switchSource"
+    >
+      <view class="bento-top">
+        <view class="line-icon icon-sd"></view>
+        <view class="bento-tag">{{source === 'sd' ? '当前' : '切换'}}</view>
+      </view>
+      <view class="bento-body">
+        <view class="bento-time">外置存储</view>
+        <view class="bento-name">SD 存储卡</view>
+        <view class="bento-sub">{{sd || '读取中…'}}</view>
+      </view>
+    </view>
+  </view>
+
+  <view class="panel-card stack" wx:if="{{selected}}">
+    <view class="row-between">
+      <view class="heading">画面预览</view>
+      <view class="badge online">{{selected}}</view>
+    </view>
+    <image wx:if="{{preview}}" class="preview" src="{{preview}}" mode="aspectFit"></image>
+    <view class="action-grid">
+      <button class="primary" bindtap="display" disabled="{{busy}}">在相框上显示</button>
+      <button class="danger-btn" bindtap="remove" disabled="{{busy || selected === 'boot'}}">{{selected === 'boot' ? '受保护' : '删除'}}</button>
+    </view>
+  </view>
+
+  <view class="section-head">
+    <view class="section-title">{{source === 'sd' ? 'SD 卡画面清单' : 'Flash 槽位画面'}}</view>
+    <view class="section-meta">共 {{pictures.length}} 项</view>
+  </view>
+
+  <view class="task-list">
+    <view
+      class="task-bar {{index % 4 === 0 ? 'tone-mint' : (index % 4 === 1 ? 'tone-blue' : (index % 4 === 2 ? 'tone-yellow' : 'tone-coral'))}} {{selected === item.id ? 'selected-bar' : ''}}"
+      hover-class="tap-pressed"
+      hover-stay-time="60"
+      wx:for="{{pictures}}"
+      wx:key="id"
+      data-id="{{item.id}}"
+      bindtap="openPicture"
+    >
+      <view class="check-circle {{selected === item.id ? 'solid' : ''}}">
+        <view class="line-icon sm {{selected === item.id ? 'icon-check' : 'icon-crop'}}"></view>
+      </view>
+      <view class="task-content">
+        <view class="task-meta">{{source === 'sd' ? 'SD 根目录帧文件' : (item.id === 'boot' ? '出厂开机画面 · 受保护' : 'Flash 最近上传槽')}}</view>
+        <view class="task-title">{{item.name}}</view>
+      </view>
+      <view class="task-pill">{{selected === item.id ? '当前选择' : '预览'}}</view>
+    </view>
+  </view>
+
+  <view class="panel-card empty-card" wx:if="{{!pictures.length && !busy}}">
+    <view class="line-icon icon-crop"></view>
+    <view class="heading">这里还没有图片</view>
+    <view class="muted">可前往「取景」工作台制作并上传六色画面。</view>
+  </view>
+
+  <button wx:if="{{next}}" class="task-bar tone-apricot" bindtap="more" disabled="{{busy}}">
+    <view class="check-circle solid">
+      <view class="line-icon sm icon-refresh"></view>
+    </view>
+    <view class="task-content">
+      <view class="task-meta">分页游标读取</view>
+      <view class="task-title">继续加载更多画面</view>
+    </view>
+    <view class="task-pill">下一页</view>
+  </button>
+
+  <view class="error-banner" wx:if="{{error}}">{{error}}</view>
+  </block>
 </view>

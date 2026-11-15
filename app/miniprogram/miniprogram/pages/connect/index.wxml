@@ -1,24 +1,147 @@
 <view class="page stack">
-  <view class="card stack">
-    <brand-mark size="hero" />
-    <view class="muted">先选择一种方式。记住的地址不会自动连接。</view>
+  <view class="top-bar">
+    <brand-mark size="bar" />
+    <view class="badge {{connected ? 'online' : ''}}">{{connected ? '已连 · ' + currentLabel : '待连接'}}</view>
   </view>
 
-  <button class="quiet" data-step="wifi" bindtap="choose" disabled="{{busy}}">Wi-Fi</button>
-  <button class="quiet" data-step="bluetooth" bindtap="choose" disabled="{{busy}}">蓝牙</button>
-  <button class="quiet" bindtap="enterOffline" disabled="{{busy}}">离线</button>
-
-  <view class="card stack" wx:if="{{step === 'wifi'}}">
-    <input class="field" value="{{address}}" placeholder="相框 IP 或主机名" bindinput="editAddress" disabled="{{busy}}" />
-    <view class="muted">端口 8080。手机和相框要在同一个局域网。</view>
-    <button class="primary" bindtap="connectWifi" disabled="{{busy || !address}}">{{busy ? '正在连接…' : '连接'}}</button>
+  <view class="hero-header">
+    <view class="grow">
+      <view class="hero-title">连接你的相框</view>
+      <view class="hero-subtitle">六色电子纸相框 · 选择连接方式或离线取景</view>
+    </view>
   </view>
 
-  <view class="card stack" wx:if="{{step === 'bluetooth'}}">
-    <view class="muted">{{message}}</view>
-    <button wx:if="{{devices.length > 1}}" wx:for="{{devices}}" wx:key="deviceId" class="quiet" data-id="{{item.deviceId}}" bindtap="connectSelected" disabled="{{busy}}">{{item.name}}</button>
-    <button class="quiet" bindtap="refresh" disabled="{{busy}}">重新查找</button>
+  <button class="task-bar tone-mint" wx:if="{{connected}}" bindtap="resumeCurrent" disabled="{{busy}}">
+    <view class="check-circle solid">
+      <view class="line-icon sm icon-check"></view>
+    </view>
+    <view class="task-content">
+      <view class="task-meta">当前活动会话 · {{currentLabel}}</view>
+      <view class="task-title">返回取景工作台</view>
+    </view>
+    <view class="task-pill">继续 ▸</view>
+  </button>
+
+  <view class="bento-grid">
+    <view class="bento-tile tone-mint {{step === 'wifi' ? 'active-tile' : ''}}" hover-class="tap-pressed" hover-stay-time="60" data-step="wifi" bindtap="choose">
+      <view class="bento-top">
+        <view class="line-icon icon-wifi"></view>
+        <view class="bento-tag">局域网</view>
+      </view>
+      <view class="bento-body">
+        <view class="bento-time">输入相框地址</view>
+        <view class="bento-name">Wi-Fi 连接</view>
+      </view>
+    </view>
+
+    <view class="bento-tile tone-yellow {{step === 'bluetooth' ? 'active-tile' : ''}}" hover-class="tap-pressed" hover-stay-time="60" data-step="bluetooth" bindtap="choose">
+      <view class="bento-top">
+        <view class="line-icon icon-bluetooth"></view>
+        <view class="bento-tag">免配网</view>
+      </view>
+      <view class="bento-body">
+        <view class="bento-time">无需同一网络</view>
+        <view class="bento-name">蓝牙连接</view>
+      </view>
+    </view>
+
+    <view class="bento-tile tone-blue" hover-class="tap-pressed" hover-stay-time="60" bindtap="enterOffline">
+      <view class="bento-top">
+        <view class="line-icon icon-crop"></view>
+        <view class="bento-tag">本地</view>
+      </view>
+      <view class="bento-body">
+        <view class="bento-time">无需连接相框</view>
+        <view class="bento-name">离线取景</view>
+      </view>
+    </view>
+
+    <view class="bento-tile tone-coral" hover-class="tap-pressed" hover-stay-time="60" bindtap="openQuickGallery">
+      <view class="bento-top">
+        <view class="line-icon icon-sparkles"></view>
+        <view class="bento-tag">图库</view>
+      </view>
+      <view class="bento-body">
+        <view class="bento-time">{{connected ? '查看或切换画面' : 'Flash 与 SD 卡'}}</view>
+        <view class="bento-name">板端图库</view>
+      </view>
+    </view>
   </view>
 
-  <view class="error" wx:if="{{error}}">{{error}}</view>
+  <view class="sheet-mask" wx:if="{{step}}" catchtap="closeSheet" catchtouchmove="noop">
+    <view class="sheet-panel stack" style="{{keyboardBottom ? 'padding-bottom:' + keyboardBottom + 'px' : ''}}" catchtap="noop">
+      <view class="sheet-handle"></view>
+
+      <block wx:if="{{step === 'wifi'}}">
+        <view class="row-between">
+          <view class="row">
+            <view class="heading">Wi-Fi 连接</view>
+            <view class="badge">端口 8080</view>
+          </view>
+          <button class="icon-circle-btn" bindtap="closeSheet" disabled="{{busy}}">
+            <view class="line-icon sm icon-close"></view>
+          </button>
+        </view>
+        <view class="muted">填写相框 IP 或主机名，手机与相框需在同一个局域网。</view>
+        <input
+          class="field"
+          placeholder-class="field-placeholder"
+          value="{{address}}"
+          placeholder="相框 IP 或主机名（如 192.168.137.42）"
+          focus="{{step === 'wifi'}}"
+          adjust-position="{{false}}"
+          cursor-spacing="0"
+          confirm-type="go"
+          bindinput="editAddress"
+          bindconfirm="connectWifi"
+          bindkeyboardheightchange="onKeyboardHeight"
+          disabled="{{busy}}"
+        />
+        <view class="sheet-target" wx:if="{{targetLabel}}">目标：{{targetLabel}}</view>
+        <view class="error-banner" wx:if="{{error}}">{{error}}</view>
+        <button class="sheet-primary tone-mint" bindtap="connectWifi" disabled="{{busy || !targetLabel}}">
+          <view class="line-icon sm icon-check"></view>
+          <text>{{busy ? '正在探测相框…' : '连接相框'}}</text>
+        </button>
+      </block>
+
+      <block wx:if="{{step === 'bluetooth'}}">
+        <view class="row-between">
+          <view class="row">
+            <view class="heading">蓝牙连接</view>
+            <view class="scan-dot" wx:if="{{!devices.length && !error}}"></view>
+            <button class="pill-action yellow" bindtap="refresh" disabled="{{busy}}">重新查找</button>
+          </view>
+          <button class="icon-circle-btn" bindtap="closeSheet" disabled="{{busy}}">
+            <view class="line-icon sm icon-close"></view>
+          </button>
+        </view>
+        <view class="muted">{{message}}</view>
+
+        <scroll-view class="sheet-list" scroll-y wx:if="{{devices.length > 0}}">
+          <view class="task-list">
+            <button
+              wx:for="{{devices}}"
+              wx:key="deviceId"
+              class="task-bar {{index % 3 === 0 ? 'tone-mint' : (index % 3 === 1 ? 'tone-blue' : 'tone-yellow')}}"
+              data-id="{{item.deviceId}}"
+              bindtap="connectSelected"
+              disabled="{{busy}}"
+            >
+              <view class="check-circle solid">
+                <view class="line-icon sm icon-bluetooth"></view>
+              </view>
+              <view class="task-content">
+                <view class="task-meta">点击建立蓝牙会话</view>
+                <view class="task-title">{{item.name}}</view>
+              </view>
+              <view class="task-pill">选择</view>
+            </button>
+          </view>
+        </scroll-view>
+
+        <view class="error-banner" wx:if="{{error}}">{{error}}</view>
+      </block>
+    </view>
+  </view>
 </view>

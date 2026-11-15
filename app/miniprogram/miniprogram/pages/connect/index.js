@@ -2,28 +2,62 @@ const { FrameSession, rememberAddress, rememberedAddress } = require("../../fram
 const { watchFrames } = require("../../frame/link")
 const workspace = require("../../frame/workspace")
 
+function targetLabel(value) {
+  const trimmed = String(value || "").trim()
+  if (!trimmed) return ""
+  return trimmed.includes(":") ? trimmed : `${trimmed}:8080`
+}
+
 Page({
   data: {
     step: "",
     address: "",
+    targetLabel: "",
     busy: false,
     devices: [],
     message: "",
     error: "",
+    connected: false,
+    currentLabel: "",
+    keyboardBottom: 0,
   },
 
   onLoad() {
-    this.setData({ address: rememberedAddress() })
+    const address = rememberedAddress()
+    this.setData({ address, targetLabel: targetLabel(address) })
+  },
+
+  onShow() {
+    const current = workspace.current()
+    this.setData({
+      connected: Boolean(current),
+      currentLabel: current ? current.label() : "",
+    })
   },
 
   choose(event) {
     const step = event.currentTarget.dataset.step
-    this.setData({ step, error: "", message: "" })
+    this.setData({ step, error: "", message: "", keyboardBottom: 0 })
     if (step === "bluetooth") this.refresh()
+    else this.stopWatch()
+  },
+
+  closeSheet() {
+    if (this.data.busy) return
+    this.stopWatch()
+    this.setData({ step: "", error: "", message: "", keyboardBottom: 0 })
+  },
+
+  noop() {},
+
+  onKeyboardHeight(event) {
+    const height = Math.max(0, Math.round((event.detail && event.detail.height) || 0))
+    this.setData({ keyboardBottom: height ? height + 12 : 0 })
   },
 
   editAddress(event) {
-    this.setData({ address: event.detail.value })
+    const address = event.detail.value
+    this.setData({ address, targetLabel: targetLabel(address) })
   },
 
   async connectWifi() {
@@ -35,7 +69,8 @@ Page({
       await session.status()
       rememberAddress(address)
       workspace.open(session)
-      wx.redirectTo({ url: "/pages/compose/index" })
+      this.setData({ step: "", keyboardBottom: 0 })
+      wx.switchTab({ url: "/pages/compose/index" })
     } catch (error) {
       this.setData({ error: error.message || "没有连上相框" })
     } finally {
@@ -45,6 +80,11 @@ Page({
 
   onUnload() {
     this.stopWatch()
+  },
+
+  onHide() {
+    this.stopWatch()
+    if (this.data.keyboardBottom) this.setData({ keyboardBottom: 0 })
   },
 
   async refresh() {
@@ -95,7 +135,8 @@ Page({
       this.stopWatch()
       workspace.open(session)
       session = null
-      wx.redirectTo({ url: "/pages/compose/index" })
+      this.setData({ step: "", keyboardBottom: 0 })
+      wx.switchTab({ url: "/pages/compose/index" })
     } catch (error) {
       if (session) session.close()
       this.setData({ error: error.message || "蓝牙连接失败" })
@@ -113,7 +154,17 @@ Page({
   enterOffline() {
     this.stopWatch()
     workspace.open(null)
-    wx.redirectTo({ url: "/pages/compose/index" })
+    wx.switchTab({ url: "/pages/compose/index" })
+  },
+
+  resumeCurrent() {
+    this.stopWatch()
+    wx.switchTab({ url: "/pages/compose/index" })
+  },
+
+  openQuickGallery() {
+    this.stopWatch()
+    wx.switchTab({ url: "/pages/gallery/index" })
   },
 })
 

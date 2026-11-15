@@ -2,6 +2,7 @@ const workspace = require("../../frame/workspace")
 
 Page({
   data: {
+    connected: false,
     source: "artifacts",
     pictures: [],
     next: "",
@@ -15,11 +16,17 @@ Page({
   },
 
   onShow() {
-    if (!workspace.current()) {
-      wx.redirectTo({ url: "/pages/connect/index" })
+    const session = workspace.current()
+    if (!session) {
+      this.setData({ connected: false, pictures: [], next: "", selected: "", preview: "", error: "" })
       return
     }
+    this.setData({ connected: true })
     this.refresh()
+  },
+
+  goConnect() {
+    wx.switchTab({ url: "/pages/connect/index" })
   },
 
   onUnload() {
@@ -212,4 +219,3 @@ function present(picture, source) {
     removable: (source === "sd" && Boolean(picture.id)) || picture.id === "inbox",
   }
 }
-
