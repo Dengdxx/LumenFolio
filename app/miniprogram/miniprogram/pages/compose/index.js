@@ -4,8 +4,14 @@ const gesture = require("../../frame/gesture")
 
 const PANEL_WIDTH = dither.PANEL_WIDTH
 const PANEL_HEIGHT = dither.PANEL_HEIGHT
-const PREVIEW_WIDTH = PANEL_WIDTH
-const PREVIEW_HEIGHT = PANEL_HEIGHT
+/**
+ * 预览只按面板像素的一半抖动。画布在屏幕上约 343 CSS px 宽，600×800 已经比屏幕密度高，
+ * 抖动点每个仍小于一个 CSS 像素；再翻倍到 1200×1600 只多花四倍算力，看不出差别。
+ * 上传帧依旧按 PANEL_WIDTH×PANEL_HEIGHT 生成，不受这里影响。
+ */
+const PREVIEW_DIVISOR = 2
+const PREVIEW_WIDTH = PANEL_WIDTH / PREVIEW_DIVISOR
+const PREVIEW_HEIGHT = PANEL_HEIGHT / PREVIEW_DIVISOR
 const ALGORITHMS = [
   "最近色",
   "Floyd-Steinberg",
@@ -31,6 +37,16 @@ const INKS = [
   { name: "绿", color: "#1e8c3c" },
 ]
 
+/** 与 frame/dither.js 的 INKS 同序同值，打包成小端 ABGR 供 Uint32 直接写 ImageData。 */
+const INK_PACKED = INKS.map((ink) => {
+  const value = parseInt(ink.color.slice(1), 16)
+  const red = (value >> 16) & 0xff
+  const green = (value >> 8) & 0xff
+  const blue = value & 0xff
+  return ((0xff << 24) | (blue << 16) | (green << 8) | red) >>> 0
+})
+const LITTLE_ENDIAN = new Uint8Array(new Uint32Array([1]).buffer)[0] === 1
+
 Page({
   data: {
     connected: false,
@@ -52,6 +68,9 @@ Page({
   onLoad() {
     this.crop = { scale: 1, ox: 0, oy: 0, angle: 0, width: 0, height: 0 }
     this.token = 0
+    this.samples = {}
+    this.previewCache = null
+    this.previewImage = null
     this.sampleCanvas = wx.createOffscreenCanvas({ type: "2d", width: PREVIEW_WIDTH, height: PREVIEW_HEIGHT })
   },
 
@@ -91,7 +110,8 @@ Page({
               angle: 0,
             }
             this.image = null
-            this.sampled = null
+            this.samples = {}
+            this.previewCache = null
             this.preview = null
             this.setData(
               { picture: file.tempFilePath, previewMode: false, previewing: false, error: "", progress: "", percent: -1 },
@@ -211,17 +231,22 @@ Page({
       await yieldToPage()
       if (token !== this.token) return
       const key = this.previewKey()
-      let pixels = this.sampled && this.sampled.key === key ? this.sampled.pixels : null
-      if (!pixels) {
-        pixels = await this.sample(PREVIEW_WIDTH, PREVIEW_HEIGHT)
-        if (token !== this.token) return
-        this.sampled = { key, pixels }
+      const algorithm = this.data.algorithm
+      const cached = this.previewCache
+      if (cached && cached.key === key && cached.algorithm === algorithm) {
+        this.preview = cached
+        this.setData({ previewing: false })
+        await this.paintPreview()
+        return
       }
+      const pixels = await this.sampleFor(PREVIEW_WIDTH, PREVIEW_HEIGHT)
+      if (token !== this.token) return
       await yieldToPage()
       if (token !== this.token) return
-      const indices = dither.renderSync(pixels, PREVIEW_WIDTH, PREVIEW_HEIGHT, this.data.algorithm)
+      const indices = dither.renderSync(pixels, PREVIEW_WIDTH, PREVIEW_HEIGHT, algorithm)
       if (token !== this.token) return
-      this.preview = { pixels: dither.preview(indices, PREVIEW_WIDTH, PREVIEW_HEIGHT), width: PREVIEW_WIDTH, height: PREVIEW_HEIGHT }
+      this.previewCache = { key, algorithm, indices }
+      this.preview = this.previewCache
       this.setData({ previewing: false })
       await this.paintPreview()
     } catch (error) {
@@ -237,13 +262,8 @@ Page({
     const token = this.token
     this.setData({ busy: true, error: "", progress: "正在采样 1200×1600…", percent: 0 })
     try {
-      const key = this.previewKey()
-      let pixels = this.sampled && this.sampled.key === key ? this.sampled.pixels : null
-      if (!pixels) {
-        pixels = await this.sample(PANEL_WIDTH, PANEL_HEIGHT)
-        if (token !== this.token) return
-        this.sampled = { key, pixels }
-      }
+      const pixels = await this.sampleFor(PANEL_WIDTH, PANEL_HEIGHT)
+      if (token !== this.token) return
       this.setData({ percent: 5, progress: "正在生成六色帧…" })
       await yieldToPage()
       const indices = dither.renderSync(pixels, PANEL_WIDTH, PANEL_HEIGHT, this.data.algorithm)
@@ -329,6 +349,17 @@ Page({
     return this.draw(this.sampleCanvas, width, height, true)
   },
 
+  /** 采样按尺寸分槽缓存：预览用 600×800，上传用 1200×1600，两者互不覆盖。 */
+  async sampleFor(width, height) {
+    const key = this.previewKey()
+    const slot = width + "x" + height
+    const hit = this.samples[slot]
+    if (hit && hit.key === key) return hit.pixels
+    const pixels = await this.sample(width, height)
+    this.samples[slot] = { key, pixels }
+    return pixels
+  },
+
   paint() {
     if (!this.data.picture || this.data.previewMode) return
     this.canvas("#viewport").then((canvas) => {
@@ -341,12 +372,12 @@ Page({
   async paintPreview() {
     if (!this.preview) return
     const canvas = await this.canvas("#viewport")
-    canvas.width = this.preview.width
-    canvas.height = this.preview.height
+    if (canvas.width !== PANEL_WIDTH) canvas.width = PANEL_WIDTH
+    if (canvas.height !== PANEL_HEIGHT) canvas.height = PANEL_HEIGHT
     const context = canvas.getContext("2d")
-    const image = context.createImageData(this.preview.width, this.preview.height)
-    image.data.set(this.preview.pixels)
-    context.putImageData(image, 0, 0)
+    if (!this.previewImage) this.previewImage = context.createImageData(PANEL_WIDTH, PANEL_HEIGHT)
+    upsample(this.previewImage.data, this.preview.indices, PREVIEW_WIDTH, PREVIEW_HEIGHT, PREVIEW_DIVISOR)
+    context.putImageData(this.previewImage, 0, 0)
   },
 
   canvas(selector) {
@@ -404,6 +435,42 @@ Page({
 /** 让已经 setData 的进度先画出来，再进入下一段长计算。 */
 function yieldToPage() {
   return new Promise((resolve) => setTimeout(resolve, 0))
+}
+
+/** 把半分辨率的抖动结果按块放大写回整幅 ImageData，省掉对每个面板像素重新求最近色。 */
+function upsample(target, indices, width, height, scale) {
+  const fullWidth = width * scale
+  if (LITTLE_ENDIAN) {
+    const out = new Uint32Array(target.buffer, target.byteOffset, target.length >> 2)
+    for (let y = 0; y < height; y += 1) {
+      for (let x = 0; x < width; x += 1) {
+        const color = INK_PACKED[indices[y * width + x]]
+        const left = x * scale
+        for (let dy = 0; dy < scale; dy += 1) {
+          const row = (y * scale + dy) * fullWidth + left
+          for (let dx = 0; dx < scale; dx += 1) out[row + dx] = color
+        }
+      }
+    }
+    return
+  }
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const color = INK_PACKED[indices[y * width + x]]
+      const red = color & 0xff
+      const green = (color >>> 8) & 0xff
+      const blue = (color >>> 16) & 0xff
+      for (let dy = 0; dy < scale; dy += 1) {
+        for (let dx = 0; dx < scale; dx += 1) {
+          const offset = ((y * scale + dy) * fullWidth + x * scale + dx) * 4
+          target[offset] = red
+          target[offset + 1] = green
+          target[offset + 2] = blue
+          target[offset + 3] = 255
+        }
+      }
+    }
+  }
 }
 
 function pair(touches) {
