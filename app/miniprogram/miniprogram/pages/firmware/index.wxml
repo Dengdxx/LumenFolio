@@ -21,7 +21,7 @@
 
   <block wx:if="{{connected}}">
   <view class="bento-grid">
-    <view class="bento-tile compact tone-blue" hover-class="tap-pressed" hover-stay-time="60" bindtap="chooseLocal">
+    <view class="bento-tile compact tone-blue" hover-class="tap-pressed" hover-stay-time="110" bindtap="chooseLocal">
       <view class="bento-top">
         <view class="line-icon icon-folder"></view>
         <view class="bento-tag">本地</view>
@@ -32,7 +32,7 @@
       </view>
     </view>
 
-    <view class="bento-tile compact tone-mint" hover-class="tap-pressed" hover-stay-time="60" bindtap="loadCloud">
+    <view class="bento-tile compact tone-mint" hover-class="tap-pressed" hover-stay-time="110" bindtap="loadCloud">
       <view class="bento-top">
         <view class="line-icon icon-cloud"></view>
         <view class="bento-tag">云端</view>

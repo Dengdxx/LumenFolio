@@ -23,7 +23,7 @@
   </button>
 
   <view class="bento-grid">
-    <view class="bento-tile tone-mint {{step === 'wifi' ? 'active-tile' : ''}}" hover-class="tap-pressed" hover-stay-time="60" data-step="wifi" bindtap="choose">
+    <view class="bento-tile tone-mint {{step === 'wifi' ? 'active-tile' : ''}}" hover-class="tap-pressed" hover-stay-time="110" data-step="wifi" bindtap="choose">
       <view class="bento-top">
         <view class="line-icon icon-wifi"></view>
         <view class="bento-tag">局域网</view>
@@ -34,7 +34,7 @@
       </view>
     </view>
 
-    <view class="bento-tile tone-yellow {{step === 'bluetooth' ? 'active-tile' : ''}}" hover-class="tap-pressed" hover-stay-time="60" data-step="bluetooth" bindtap="choose">
+    <view class="bento-tile tone-yellow {{step === 'bluetooth' ? 'active-tile' : ''}}" hover-class="tap-pressed" hover-stay-time="110" data-step="bluetooth" bindtap="choose">
       <view class="bento-top">
         <view class="line-icon icon-bluetooth"></view>
         <view class="bento-tag">免配网</view>
@@ -45,7 +45,7 @@
       </view>
     </view>
 
-    <view class="bento-tile tone-blue" hover-class="tap-pressed" hover-stay-time="60" bindtap="enterOffline">
+    <view class="bento-tile tone-blue" hover-class="tap-pressed" hover-stay-time="110" bindtap="enterOffline">
       <view class="bento-top">
         <view class="line-icon icon-crop"></view>
         <view class="bento-tag">本地</view>
@@ -56,7 +56,7 @@
       </view>
     </view>
 
-    <view class="bento-tile tone-coral" hover-class="tap-pressed" hover-stay-time="60" bindtap="openQuickGallery">
+    <view class="bento-tile tone-coral" hover-class="tap-pressed" hover-stay-time="110" bindtap="openQuickGallery">
       <view class="bento-top">
         <view class="line-icon icon-sparkles"></view>
         <view class="bento-tag">图库</view>

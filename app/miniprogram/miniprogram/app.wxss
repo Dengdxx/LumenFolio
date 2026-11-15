@@ -107,7 +107,7 @@ page {
   justify-content: space-between;
   gap: 20rpx;
   padding: 4rpx 0 6rpx;
-  animation: cardRise 0.24s cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation: cardRise 0.42s cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
 .hero-title {
@@ -197,20 +197,20 @@ page {
   background: #FFFDF8;
   color: #161616;
   text-align: left;
-  transition: transform 0.14s cubic-bezier(0.2, 0.8, 0.2, 1), box-shadow 0.14s ease, background-color 0.18s ease;
-  animation: cardRise 0.26s cubic-bezier(0.22, 1, 0.36, 1) both;
+  transition: transform 0.2s cubic-bezier(0.2, 0.8, 0.2, 1), box-shadow 0.2s ease, background-color 0.24s ease;
+  animation: cardRise 0.42s cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
 .bento-grid .bento-tile:nth-child(2) {
-  animation-delay: 0.04s;
+  animation-delay: 0.06s;
 }
 
 .bento-grid .bento-tile:nth-child(3) {
-  animation-delay: 0.08s;
+  animation-delay: 0.12s;
 }
 
 .bento-grid .bento-tile:nth-child(4) {
-  animation-delay: 0.12s;
+  animation-delay: 0.18s;
 }
 
 .bento-tile.compact {
@@ -292,28 +292,28 @@ page {
   color: #161616;
   text-align: left;
   line-height: 1.35;
-  transition: transform 0.14s cubic-bezier(0.2, 0.8, 0.2, 1), box-shadow 0.14s ease, background-color 0.18s ease;
-  animation: cardRise 0.24s cubic-bezier(0.22, 1, 0.36, 1) both;
+  transition: transform 0.2s cubic-bezier(0.2, 0.8, 0.2, 1), box-shadow 0.2s ease, background-color 0.24s ease;
+  animation: cardRise 0.42s cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
 .task-list .task-bar:nth-child(2) {
-  animation-delay: 0.04s;
+  animation-delay: 0.06s;
 }
 
 .task-list .task-bar:nth-child(3) {
-  animation-delay: 0.08s;
-}
-
-.task-list .task-bar:nth-child(4) {
   animation-delay: 0.12s;
 }
 
+.task-list .task-bar:nth-child(4) {
+  animation-delay: 0.18s;
+}
+
 .task-list .task-bar:nth-child(5) {
-  animation-delay: 0.16s;
+  animation-delay: 0.24s;
 }
 
 .task-list .task-bar:nth-child(n+6) {
-  animation-delay: 0.2s;
+  animation-delay: 0.3s;
 }
 
 .task-bar.selected-bar {
@@ -379,7 +379,7 @@ page {
   border-radius: 30rpx;
   background: #FFFDF8;
   border: 4rpx solid #161616;
-  animation: cardRise 0.26s cubic-bezier(0.22, 1, 0.36, 1) 0.08s both;
+  animation: cardRise 0.42s cubic-bezier(0.22, 1, 0.36, 1) 0.12s both;
 }
 
 .heading {
@@ -418,7 +418,7 @@ button {
   font-size: 30rpx;
   font-weight: 800;
   line-height: 88rpx;
-  transition: transform 0.12s cubic-bezier(0.2, 0.8, 0.2, 1), box-shadow 0.12s ease, opacity 0.12s ease, background-color 0.18s ease;
+  transition: transform 0.18s cubic-bezier(0.2, 0.8, 0.2, 1), box-shadow 0.18s ease, opacity 0.18s ease, background-color 0.24s ease;
 }
 
 button:not([disabled]):active,
@@ -505,7 +505,7 @@ button[disabled] {
   font-size: 26rpx;
   font-weight: 700;
   line-height: 1.45;
-  animation: bannerPop 0.2s cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation: bannerPop 0.34s cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
 .notice-banner {
@@ -518,7 +518,7 @@ button[disabled] {
   font-size: 26rpx;
   font-weight: 700;
   line-height: 1.45;
-  animation: bannerPop 0.2s cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation: bannerPop 0.34s cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
 @keyframes cardRise {

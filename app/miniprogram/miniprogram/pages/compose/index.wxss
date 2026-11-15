@@ -1,5 +1,5 @@
 .canvas-card {
-  animation: fadeOnly 0.22s ease both;
+  animation: fadeOnly 0.36s ease both;
 }
 
 .viewport-wrap {
@@ -68,7 +68,7 @@
 .empty-logo {
   width: 156rpx;
   height: 156rpx;
-  animation: softFloat 3.2s ease-in-out infinite;
+  animation: softFloat 5s ease-in-out infinite;
 }
 
 @keyframes softFloat {
@@ -153,7 +153,7 @@
   height: 100%;
   border-radius: 999rpx;
   background: #161616;
-  transition: width 0.15s ease;
+  transition: width 0.24s ease;
 }
 
 .only-dark {

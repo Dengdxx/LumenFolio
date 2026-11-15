@@ -24,7 +24,7 @@
     <view
       class="bento-tile compact tone-mint {{source === 'artifacts' ? 'active-tile' : ''}}"
       hover-class="tap-pressed"
-      hover-stay-time="60"
+      hover-stay-time="110"
       data-source="artifacts"
       bindtap="switchSource"
     >
@@ -42,7 +42,7 @@
     <view
       class="bento-tile compact tone-yellow {{source === 'sd' ? 'active-tile' : ''}}"
       hover-class="tap-pressed"
-      hover-stay-time="60"
+      hover-stay-time="110"
       data-source="sd"
       bindtap="switchSource"
     >
@@ -79,7 +79,7 @@
     <view
       class="task-bar {{index % 4 === 0 ? 'tone-mint' : (index % 4 === 1 ? 'tone-blue' : (index % 4 === 2 ? 'tone-yellow' : 'tone-coral'))}} {{selected === item.id ? 'selected-bar' : ''}}"
       hover-class="tap-pressed"
-      hover-stay-time="60"
+      hover-stay-time="110"
       wx:for="{{pictures}}"
       wx:key="id"
       data-id="{{item.id}}"
