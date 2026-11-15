@@ -1,14 +1,15 @@
 page {
   min-height: 100%;
-  background: #f7f6f0;
-  color: #141413;
+  background: #F7F5EE;
+  color: #161616;
   font-size: 30rpx;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
 }
 
 .page {
   box-sizing: border-box;
   min-height: 100vh;
-  padding: 32rpx;
+  padding: 24rpx 32rpx 48rpx;
 }
 
 .stack {
@@ -17,70 +18,10 @@ page {
   gap: 24rpx;
 }
 
-.card {
-  padding: 32rpx;
-  border-radius: 16rpx;
-  background: #fafaf7;
-  border: 1rpx solid rgba(31, 30, 29, 0.12);
-}
-
-.heading {
-  font-size: 34rpx;
-  font-weight: 600;
-}
-
-.muted {
-  color: #3d3c3a;
-  font-size: 26rpx;
-  line-height: 1.5;
-}
-
-.field {
-  box-sizing: border-box;
-  width: 100%;
-  height: 96rpx;
-  padding: 0 24rpx;
-  border-radius: 16rpx;
-  background: #f0efe8;
-  border: 1rpx solid rgba(31, 30, 29, 0.18);
-}
-
-button {
-  margin: 0;
-  border-radius: 16rpx;
-  font-size: 30rpx;
-  line-height: 88rpx;
-}
-
-button::after {
-  border: none;
-}
-
-.primary {
-  color: #141413;
-  background: #d07044;
-}
-
-.quiet {
-  color: #141413;
-  background: transparent;
-  border: 1rpx solid rgba(31, 30, 29, 0.22);
-}
-
-.chip {
-  width: auto;
-  padding: 0 28rpx;
-  line-height: 64rpx;
-  font-size: 26rpx;
-  color: #141413;
-  background: transparent;
-  border: 1rpx solid rgba(31, 30, 29, 0.22);
-}
-
-.chip.selected {
-  color: #8c401d;
-  background: #f4e2d9;
-  border-color: transparent;
+.stack-sm {
+  display: flex;
+  flex-direction: column;
+  gap: 16rpx;
 }
 
 .row {
@@ -89,51 +30,787 @@ button::after {
   gap: 16rpx;
 }
 
+.row-between {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16rpx;
+}
+
 .grow {
   flex: 1;
   min-width: 0;
 }
 
-.error {
-  color: #b83131;
+/* ───────────── 顶部工具栏与层级标题 ───────────── */
+.top-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16rpx;
+  padding: 4rpx 0 8rpx;
+}
+
+.top-actions {
+  display: flex;
+  align-items: center;
+  gap: 12rpx;
+  flex-shrink: 0;
+}
+
+.pill-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10rpx;
+  width: auto !important;
+  min-height: 68rpx;
+  padding: 0 26rpx !important;
+  margin: 0 !important;
+  border-radius: 999rpx;
+  border: 4rpx solid #161616;
+  background: #FFFDF8;
+  color: #161616;
   font-size: 26rpx;
+  font-weight: 700;
+  line-height: 60rpx;
+}
+
+.pill-action.mint {
+  background: #B4E8D2;
+}
+
+.pill-action.yellow {
+  background: #FAE69B;
+}
+
+.pill-action.blue {
+  background: #BCE0F7;
+}
+
+.icon-circle-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 72rpx !important;
+  height: 72rpx !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  border-radius: 50%;
+  border: 4rpx solid #161616;
+  background: #FFFDF8;
+}
+
+.hero-header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 20rpx;
+  padding: 4rpx 0 6rpx;
+  animation: cardRise 0.24s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.hero-title {
+  font-size: 48rpx;
+  font-weight: 800;
+  line-height: 1.18;
+  letter-spacing: -0.5rpx;
+  color: #161616;
+}
+
+.hero-subtitle {
+  margin-top: 8rpx;
+  font-size: 27rpx;
+  font-weight: 500;
+  line-height: 1.45;
+  color: #383633;
+}
+
+.section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16rpx;
+  padding: 8rpx 4rpx 0;
+}
+
+.section-title {
+  font-size: 32rpx;
+  font-weight: 800;
+  color: #161616;
+}
+
+.section-meta {
+  font-size: 24rpx;
+  font-weight: 600;
+  color: #383633;
+}
+
+/* ───────────── 线稿色块主题系统 ───────────── */
+.tone-mint {
+  background: #B4E8D2 !important;
+  color: #161616 !important;
+}
+
+.tone-yellow {
+  background: #FAE69B !important;
+  color: #161616 !important;
+}
+
+.tone-blue {
+  background: #BCE0F7 !important;
+  color: #161616 !important;
+}
+
+.tone-coral {
+  background: #F8BDBD !important;
+  color: #161616 !important;
+}
+
+.tone-apricot {
+  background: #FBC6A0 !important;
+  color: #161616 !important;
+}
+
+.tone-paper {
+  background: #FFFDF8 !important;
+  color: #161616 !important;
+}
+
+/* ───────────── 双列 Bento 矩阵卡片（左图风格） ───────────── */
+.bento-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 22rpx;
+}
+
+.bento-tile {
+  box-sizing: border-box;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  min-height: 256rpx;
+  padding: 28rpx;
+  border-radius: 30rpx;
+  border: 4rpx solid #161616;
+  background: #FFFDF8;
+  color: #161616;
+  text-align: left;
+  transition: transform 0.14s cubic-bezier(0.2, 0.8, 0.2, 1), box-shadow 0.14s ease, background-color 0.18s ease;
+  animation: cardRise 0.26s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.bento-grid .bento-tile:nth-child(2) {
+  animation-delay: 0.04s;
+}
+
+.bento-grid .bento-tile:nth-child(3) {
+  animation-delay: 0.08s;
+}
+
+.bento-grid .bento-tile:nth-child(4) {
+  animation-delay: 0.12s;
+}
+
+.bento-tile.compact {
+  min-height: 212rpx;
+  padding: 24rpx;
+}
+
+.bento-tile.active-tile {
+  box-shadow: 0 8rpx 0 #161616;
+  transform: translateY(-4rpx);
+}
+
+.bento-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12rpx;
+}
+
+.bento-tag {
+  padding: 4rpx 16rpx;
+  border-radius: 999rpx;
+  border: 3rpx solid #161616;
+  background: rgba(255, 253, 248, 0.88);
+  font-size: 21rpx;
+  font-weight: 800;
+  line-height: 1.4;
+  color: #161616;
+}
+
+.bento-body {
+  display: flex;
+  flex-direction: column;
+  gap: 6rpx;
+  margin-top: 24rpx;
+}
+
+.bento-time {
+  font-size: 23rpx;
+  font-weight: 700;
+  letter-spacing: 0.4rpx;
+  color: #262523;
+}
+
+.bento-name {
+  font-size: 34rpx;
+  font-weight: 800;
+  line-height: 1.24;
+  color: #161616;
+  word-break: break-word;
+}
+
+.bento-sub {
+  font-size: 24rpx;
+  font-weight: 600;
+  line-height: 1.35;
+  color: #2E2D2A;
+}
+
+/* ───────────── 横向色块任务条（右图风格） ───────────── */
+.task-list {
+  display: flex;
+  flex-direction: column;
+  gap: 20rpx;
+}
+
+.task-bar {
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  gap: 22rpx;
+  width: 100% !important;
+  min-height: 124rpx;
+  padding: 22rpx 28rpx !important;
+  margin: 0 !important;
+  border-radius: 26rpx;
+  border: 4rpx solid #161616;
+  background: #FFFDF8;
+  color: #161616;
+  text-align: left;
+  line-height: 1.35;
+  transition: transform 0.14s cubic-bezier(0.2, 0.8, 0.2, 1), box-shadow 0.14s ease, background-color 0.18s ease;
+  animation: cardRise 0.24s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.task-list .task-bar:nth-child(2) {
+  animation-delay: 0.04s;
+}
+
+.task-list .task-bar:nth-child(3) {
+  animation-delay: 0.08s;
+}
+
+.task-list .task-bar:nth-child(4) {
+  animation-delay: 0.12s;
+}
+
+.task-list .task-bar:nth-child(5) {
+  animation-delay: 0.16s;
+}
+
+.task-list .task-bar:nth-child(n+6) {
+  animation-delay: 0.2s;
+}
+
+.task-bar.selected-bar {
+  box-shadow: 0 7rpx 0 #161616;
+  transform: translateY(-3rpx);
+}
+
+.check-circle {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 56rpx;
+  height: 56rpx;
+  border-radius: 50%;
+  border: 4rpx solid #161616;
+  background: rgba(255, 253, 248, 0.72);
+}
+
+.check-circle.solid {
+  background: #FFFDF8;
+}
+
+.task-content {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4rpx;
+}
+
+.task-meta {
+  font-size: 23rpx;
+  font-weight: 700;
+  color: #2B2A28;
+}
+
+.task-title {
+  font-size: 32rpx;
+  font-weight: 800;
+  color: #161616;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.task-pill {
+  flex: none;
+  padding: 6rpx 18rpx;
+  border-radius: 999rpx;
+  border: 3rpx solid #161616;
+  background: rgba(255, 253, 248, 0.9);
+  font-size: 22rpx;
+  font-weight: 800;
+  color: #161616;
+}
+
+/* ───────────── 通用线稿容器卡片与表单控件 ───────────── */
+.card,
+.panel-card {
+  box-sizing: border-box;
+  padding: 30rpx;
+  border-radius: 30rpx;
+  background: #FFFDF8;
+  border: 4rpx solid #161616;
+  animation: cardRise 0.26s cubic-bezier(0.22, 1, 0.36, 1) 0.08s both;
+}
+
+.heading {
+  font-size: 34rpx;
+  font-weight: 800;
+  color: #161616;
+}
+
+.muted {
+  color: #383633;
+  font-size: 26rpx;
+  font-weight: 500;
+  line-height: 1.5;
+}
+
+.field {
+  box-sizing: border-box;
+  width: 100%;
+  height: 112rpx;
+  padding: 0 30rpx;
+  border-radius: 22rpx;
+  background: #F7F5EE;
+  border: 4rpx solid #161616;
+  font-size: 32rpx;
+  font-weight: 600;
+  color: #161616;
+}
+
+button {
+  box-sizing: border-box;
+  margin: 0;
+  width: 100%;
+  min-height: 0;
+  padding: 0 24rpx;
+  border-radius: 24rpx;
+  font-size: 30rpx;
+  font-weight: 800;
+  line-height: 88rpx;
+  transition: transform 0.12s cubic-bezier(0.2, 0.8, 0.2, 1), box-shadow 0.12s ease, opacity 0.12s ease, background-color 0.18s ease;
+}
+
+button:not([disabled]):active,
+.tap-pressed {
+  transform: translateY(3rpx) scale(0.985) !important;
+  opacity: 0.92;
+}
+
+.bento-tile.active-tile.tap-pressed {
+  box-shadow: 0 2rpx 0 #161616 !important;
+  transform: translateY(2rpx) scale(0.985) !important;
+}
+
+button::after {
+  border: none;
+}
+
+button[disabled] {
+  opacity: 0.55;
+}
+
+.primary {
+  color: #161616 !important;
+  background: #B4E8D2 !important;
+  border: 4rpx solid #161616 !important;
+}
+
+.danger-btn {
+  color: #161616 !important;
+  background: #F8BDBD !important;
+  border: 4rpx solid #161616 !important;
+}
+
+.quiet {
+  color: #161616 !important;
+  background: #FFFDF8 !important;
+  border: 4rpx solid #161616 !important;
+}
+
+.chip {
+  width: auto !important;
+  margin: 0 !important;
+  padding: 0 30rpx !important;
+  line-height: 70rpx;
+  font-size: 27rpx;
+  font-weight: 800;
+  color: #161616 !important;
+  background: #FFFDF8 !important;
+  border: 4rpx solid #161616 !important;
+  border-radius: 999rpx;
+}
+
+.chip.selected {
+  color: #161616 !important;
+  background: #B4E8D2 !important;
+  box-shadow: 0 4rpx 0 #161616;
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 8rpx;
+  padding: 6rpx 20rpx;
+  border-radius: 999rpx;
+  border: 3rpx solid #161616;
+  background: #FAE69B;
+  color: #161616;
+  font-size: 23rpx;
+  font-weight: 800;
+}
+
+.badge.online {
+  background: #B4E8D2;
+}
+
+.error-banner,
+.error {
+  box-sizing: border-box;
+  padding: 20rpx 24rpx;
+  border-radius: 22rpx;
+  border: 4rpx solid #161616;
+  background: #F8BDBD;
+  color: #161616;
+  font-size: 26rpx;
+  font-weight: 700;
+  line-height: 1.45;
+  animation: bannerPop 0.2s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.notice-banner {
+  box-sizing: border-box;
+  padding: 20rpx 24rpx;
+  border-radius: 22rpx;
+  border: 4rpx solid #161616;
+  background: #FAE69B;
+  color: #161616;
+  font-size: 26rpx;
+  font-weight: 700;
+  line-height: 1.45;
+  animation: bannerPop 0.2s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@keyframes cardRise {
+  from {
+    opacity: 0;
+    transform: translateY(16rpx);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes fadeOnly {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes bannerPop {
+  from {
+    opacity: 0;
+    transform: translateY(8rpx) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+/* ───────────── 矢量线稿图标系统（2px 墨线） ───────────── */
+.line-icon {
+  display: inline-block;
+  width: 60rpx;
+  height: 60rpx;
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: contain;
+  flex-shrink: 0;
+}
+
+.line-icon.sm {
+  width: 34rpx;
+  height: 34rpx;
+}
+
+.line-icon.md {
+  width: 44rpx;
+  height: 44rpx;
+}
+
+.icon-check {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23161616' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='20 6 9 17 4 12'/%3E%3C/svg%3E");
+}
+
+.icon-wifi {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23161616' stroke-width='2.1' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 12.55a11 11 0 0 1 14.08 0'/%3E%3Cpath d='M1.42 9a16 16 0 0 1 21.16 0'/%3E%3Cpath d='M8.53 16.11a6 6 0 0 1 6.95 0'/%3E%3Ccircle cx='12' cy='20' r='1.2' fill='%23161616'/%3E%3C/svg%3E");
+}
+
+.icon-bluetooth {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23161616' stroke-width='2.1' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6.5 6.5 17.5 17.5 12 23 12 1 17.5 6.5 6.5 17.5'/%3E%3C/svg%3E");
+}
+
+.icon-crop {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23161616' stroke-width='2.1' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='4' y='3' width='16' height='18' rx='3'/%3E%3Ccircle cx='9.5' cy='8.5' r='1.8'/%3E%3Cpath d='M4 16l4.5-4.5a2 2 0 0 1 2.8 0L16 16'/%3E%3Cpath d='M14 14l2-2a2 2 0 0 1 2.8 0L20 13.2'/%3E%3C/svg%3E");
+}
+
+.icon-sparkles {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23161616' stroke-width='2.1' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9L12 3z'/%3E%3Cpath d='M19 16l.9 2.1L22 19l-2.1.9L19 22l-.9-2.1L16 19l2.1-.9L19 16z'/%3E%3C/svg%3E");
+}
+
+.icon-palette {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23161616' stroke-width='2.1' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='13.5' cy='6.5' r='.8' fill='%23161616'/%3E%3Ccircle cx='17.5' cy='10.5' r='.8' fill='%23161616'/%3E%3Ccircle cx='8.5' cy='7.5' r='.8' fill='%23161616'/%3E%3Ccircle cx='6.5' cy='12.5' r='.8' fill='%23161616'/%3E%3Cpath d='M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10c.93 0 1.65-.75 1.65-1.69 0-.44-.18-.84-.44-1.12-.29-.29-.44-.65-.44-1.13a1.64 1.64 0 0 1 1.67-1.67h2c3.05 0 5.56-2.5 5.56-5.55C22 6.04 17.5 2 12 2z'/%3E%3C/svg%3E");
+}
+
+.icon-flash {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23161616' stroke-width='2.1' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='6' y='6' width='12' height='12' rx='2'/%3E%3Crect x='9' y='9' width='6' height='6'/%3E%3Cpath d='M9 2v4M15 2v4M9 18v4M15 18v4M2 9h4M2 15h4M18 9h4M18 15h4'/%3E%3C/svg%3E");
+}
+
+.icon-sd {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23161616' stroke-width='2.1' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 2h9l5 5v13a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2z'/%3E%3Cpath d='M8 6v4M11 6v4M14 6v4'/%3E%3C/svg%3E");
+}
+
+.icon-upload {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23161616' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4'/%3E%3Cpolyline points='17 8 12 3 7 8'/%3E%3Cline x1='12' y1='3' x2='12' y2='15'/%3E%3C/svg%3E");
+}
+
+.icon-folder {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23161616' stroke-width='2.1' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z'/%3E%3C/svg%3E");
+}
+
+.icon-cloud {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23161616' stroke-width='2.1' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z'/%3E%3C/svg%3E");
+}
+
+.icon-refresh {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23161616' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='23 4 23 10 17 10'/%3E%3Cpath d='M20.49 15a9 9 0 1 1-2.12-9.36L23 10'/%3E%3C/svg%3E");
+}
+
+.icon-close {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23161616' stroke-width='2.3' stroke-linecap='round' stroke-linejoin='round'%3E%3Cline x1='18' y1='6' x2='6' y2='18'/%3E%3Cline x1='6' y1='6' x2='18' y2='18'/%3E%3C/svg%3E");
+}
+
+.field-placeholder {
+  color: #6B675E;
 }
 
 @media (prefers-color-scheme: dark) {
   page {
-    background: #0a0a0a;
-    color: #f5f5f7;
+    background: #0C1117;
+    color: #F4EEE2;
   }
 
-  .card {
-    background: #1c1c1e;
-    border-color: rgba(255, 255, 255, 0.12);
+  .hero-title,
+  .section-title,
+  .heading,
+  .bento-name,
+  .task-title {
+    color: #F4EEE2;
   }
 
+  .hero-subtitle,
+  .section-meta,
   .muted,
+  .bento-time,
+  .bento-sub,
+  .task-meta {
+    color: #C7C0B3;
+  }
+
+  .card,
+  .panel-card,
+  .bento-tile,
+  .task-bar {
+    background: #1B242E;
+    border-color: #F4EEE2;
+    color: #F4EEE2;
+  }
+
+  .tone-paper {
+    background: #1B242E !important;
+    color: #F4EEE2 !important;
+  }
+
+  .tone-mint {
+    background: #2E6150 !important;
+    color: #F4EEE2 !important;
+  }
+
+  .tone-yellow {
+    background: #6B5A22 !important;
+    color: #F4EEE2 !important;
+  }
+
+  .tone-blue {
+    background: #2A5375 !important;
+    color: #F4EEE2 !important;
+  }
+
+  .tone-coral {
+    background: #6E3A3F !important;
+    color: #F4EEE2 !important;
+  }
+
+  .tone-apricot {
+    background: #6F4A32 !important;
+    color: #F4EEE2 !important;
+  }
+
+  .bento-tile.active-tile {
+    box-shadow: 0 8rpx 0 #F4EEE2;
+  }
+
+  .task-bar.selected-bar {
+    box-shadow: 0 7rpx 0 #F4EEE2;
+  }
+
+  .bento-tag,
+  .task-pill,
+  .check-circle,
+  .check-circle.solid {
+    background: rgba(12, 17, 23, 0.72);
+    border-color: #F4EEE2;
+    color: #F4EEE2;
+  }
+
+  .pill-action,
+  .icon-circle-btn,
   .quiet,
   .chip {
-    color: #98989d;
-    border-color: rgba(255, 255, 255, 0.18);
+    background: #1B242E !important;
+    border-color: #F4EEE2 !important;
+    color: #F4EEE2 !important;
   }
 
-  .field {
-    background: #2c2c2e;
-    color: #f5f5f7;
-    border-color: rgba(255, 255, 255, 0.18);
-  }
-
-  .primary {
-    color: #141413;
-    background: #0a84ff;
+  .pill-action.mint,
+  .primary,
+  .chip.selected,
+  .badge.online {
+    background: #2E6150 !important;
+    border-color: #F4EEE2 !important;
+    color: #F4EEE2 !important;
   }
 
   .chip.selected {
-    color: #8cc8ff;
-    background: #12324d;
+    box-shadow: 0 4rpx 0 #F4EEE2;
   }
 
+  .pill-action.yellow,
+  .badge,
+  .notice-banner {
+    background: #6B5A22 !important;
+    border-color: #F4EEE2 !important;
+    color: #F4EEE2 !important;
+  }
+
+  .pill-action.blue {
+    background: #2A5375 !important;
+    border-color: #F4EEE2 !important;
+    color: #F4EEE2 !important;
+  }
+
+  .danger-btn,
+  .error-banner,
   .error {
-    color: #ff6961;
+    background: #6E3A3F !important;
+    border-color: #F4EEE2 !important;
+    color: #F4EEE2 !important;
+  }
+
+  .field {
+    background: #131921;
+    border-color: #F4EEE2;
+    color: #F4EEE2;
+  }
+
+  .field-placeholder {
+    color: #8C877D;
+  }
+
+  .icon-check {
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23F4EEE2' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='20 6 9 17 4 12'/%3E%3C/svg%3E");
+  }
+
+  .icon-wifi {
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23F4EEE2' stroke-width='2.1' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 12.55a11 11 0 0 1 14.08 0'/%3E%3Cpath d='M1.42 9a16 16 0 0 1 21.16 0'/%3E%3Cpath d='M8.53 16.11a6 6 0 0 1 6.95 0'/%3E%3Ccircle cx='12' cy='20' r='1.2' fill='%23F4EEE2'/%3E%3C/svg%3E");
+  }
+
+  .icon-bluetooth {
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23F4EEE2' stroke-width='2.1' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6.5 6.5 17.5 17.5 12 23 12 1 17.5 6.5 6.5 17.5'/%3E%3C/svg%3E");
+  }
+
+  .icon-crop {
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23F4EEE2' stroke-width='2.1' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='4' y='3' width='16' height='18' rx='3'/%3E%3Ccircle cx='9.5' cy='8.5' r='1.8'/%3E%3Cpath d='M4 16l4.5-4.5a2 2 0 0 1 2.8 0L16 16'/%3E%3Cpath d='M14 14l2-2a2 2 0 0 1 2.8 0L20 13.2'/%3E%3C/svg%3E");
+  }
+
+  .icon-sparkles {
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23F4EEE2' stroke-width='2.1' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9L12 3z'/%3E%3Cpath d='M19 16l.9 2.1L22 19l-2.1.9L19 22l-.9-2.1L16 19l2.1-.9L19 16z'/%3E%3C/svg%3E");
+  }
+
+  .icon-palette {
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23F4EEE2' stroke-width='2.1' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='13.5' cy='6.5' r='.8' fill='%23F4EEE2'/%3E%3Ccircle cx='17.5' cy='10.5' r='.8' fill='%23F4EEE2'/%3E%3Ccircle cx='8.5' cy='7.5' r='.8' fill='%23F4EEE2'/%3E%3Ccircle cx='6.5' cy='12.5' r='.8' fill='%23F4EEE2'/%3E%3Cpath d='M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10c.93 0 1.65-.75 1.65-1.69 0-.44-.18-.84-.44-1.12-.29-.29-.44-.65-.44-1.13a1.64 1.64 0 0 1 1.67-1.67h2c3.05 0 5.56-2.5 5.56-5.55C22 6.04 17.5 2 12 2z'/%3E%3C/svg%3E");
+  }
+
+  .icon-flash {
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23F4EEE2' stroke-width='2.1' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='6' y='6' width='12' height='12' rx='2'/%3E%3Crect x='9' y='9' width='6' height='6'/%3E%3Cpath d='M9 2v4M15 2v4M9 18v4M15 18v4M2 9h4M2 15h4M18 9h4M18 15h4'/%3E%3C/svg%3E");
+  }
+
+  .icon-sd {
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23F4EEE2' stroke-width='2.1' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 2h9l5 5v13a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2z'/%3E%3Cpath d='M8 6v4M11 6v4M14 6v4'/%3E%3C/svg%3E");
+  }
+
+  .icon-upload {
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23F4EEE2' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4'/%3E%3Cpolyline points='17 8 12 3 7 8'/%3E%3Cline x1='12' y1='3' x2='12' y2='15'/%3E%3C/svg%3E");
+  }
+
+  .icon-folder {
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23F4EEE2' stroke-width='2.1' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z'/%3E%3C/svg%3E");
+  }
+
+  .icon-cloud {
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23F4EEE2' stroke-width='2.1' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z'/%3E%3C/svg%3E");
+  }
+
+  .icon-refresh {
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23F4EEE2' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='23 4 23 10 17 10'/%3E%3Cpath d='M20.49 15a9 9 0 1 1-2.12-9.36L23 10'/%3E%3C/svg%3E");
+  }
+
+  .icon-close {
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23F4EEE2' stroke-width='2.3' stroke-linecap='round' stroke-linejoin='round'%3E%3Cline x1='18' y1='6' x2='6' y2='18'/%3E%3Cline x1='6' y1='6' x2='18' y2='18'/%3E%3C/svg%3E");
   }
 }

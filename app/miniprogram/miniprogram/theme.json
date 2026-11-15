@@ -1,12 +1,38 @@
 {
   "light": {
-    "navigationBarBackgroundColor": "#F7F6F0",
-    "navigationBarTextStyle": "black",
-    "backgroundColor": "#F7F6F0"
+    "navBgColor": "#F7F5EE",
+    "navTxtStyle": "black",
+    "bgColor": "#F7F5EE",
+    "bgTxtStyle": "dark",
+    "tabColor": "#5E5B55",
+    "tabSelectedColor": "#161616",
+    "tabBgColor": "#F7F5EE",
+    "tabBorderStyle": "black",
+    "tabIconConnect": "images/nav-connect.png",
+    "tabSelectedIconConnect": "images/nav-connect-active.png",
+    "tabIconCompose": "images/nav-compose.png",
+    "tabSelectedIconCompose": "images/nav-compose-active.png",
+    "tabIconGallery": "images/nav-gallery.png",
+    "tabSelectedIconGallery": "images/nav-gallery-active.png",
+    "tabIconFirmware": "images/nav-firmware.png",
+    "tabSelectedIconFirmware": "images/nav-firmware-active.png"
   },
   "dark": {
-    "navigationBarBackgroundColor": "#0A0A0A",
-    "navigationBarTextStyle": "white",
-    "backgroundColor": "#0A0A0A"
+    "navBgColor": "#0C1117",
+    "navTxtStyle": "white",
+    "bgColor": "#0C1117",
+    "bgTxtStyle": "light",
+    "tabColor": "#9C968B",
+    "tabSelectedColor": "#F4EEE2",
+    "tabBgColor": "#0C1117",
+    "tabBorderStyle": "white",
+    "tabIconConnect": "images/nav-connect-dark.png",
+    "tabSelectedIconConnect": "images/nav-connect-active-dark.png",
+    "tabIconCompose": "images/nav-compose-dark.png",
+    "tabSelectedIconCompose": "images/nav-compose-active-dark.png",
+    "tabIconGallery": "images/nav-gallery-dark.png",
+    "tabSelectedIconGallery": "images/nav-gallery-active-dark.png",
+    "tabIconFirmware": "images/nav-firmware-dark.png",
+    "tabSelectedIconFirmware": "images/nav-firmware-active-dark.png"
   }
 }

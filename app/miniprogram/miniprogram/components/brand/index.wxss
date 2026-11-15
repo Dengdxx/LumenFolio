@@ -1,49 +1,80 @@
 .brand {
   display: flex;
   align-items: center;
-  gap: 20rpx;
+  gap: 18rpx;
   min-width: 0;
 }
 
-.icon {
+.icon-frame {
   flex: none;
-  background: #f7f3ea;
-  border-radius: 16rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #FFFDF8;
+  border: 4rpx solid #161616;
+  border-radius: 22rpx;
+  box-shadow: 0 4rpx 0 #161616;
+}
+
+.icon {
+  display: block;
 }
 
 .word {
   min-width: 0;
 }
 
+.bar .icon-frame {
+  width: 72rpx;
+  height: 72rpx;
+}
+
 .bar .icon {
-  width: 60rpx;
-  height: 60rpx;
-  padding: 6rpx;
+  width: 54rpx;
+  height: 54rpx;
 }
 
 .bar .word {
-  width: 280rpx;
-  height: 48rpx;
+  width: 248rpx;
+  height: 46rpx;
 }
 
 .hero {
-  gap: 28rpx;
+  gap: 24rpx;
+}
+
+.hero .icon-frame {
+  width: 112rpx;
+  height: 112rpx;
+  border-radius: 28rpx;
 }
 
 .hero .icon {
-  width: 128rpx;
-  height: 128rpx;
-  padding: 8rpx;
-  border-radius: 28rpx;
+  width: 86rpx;
+  height: 86rpx;
 }
 
 .hero .word {
   flex: 1;
-  height: 96rpx;
+  height: 76rpx;
+}
+
+.only-dark {
+  display: none;
 }
 
 @media (prefers-color-scheme: dark) {
-  .word {
-    filter: invert(1);
+  .only-light {
+    display: none;
+  }
+
+  .only-dark {
+    display: block;
+  }
+
+  .icon-frame {
+    background: #1B242E;
+    border-color: #F4EEE2;
+    box-shadow: 0 4rpx 0 #F4EEE2;
   }
 }

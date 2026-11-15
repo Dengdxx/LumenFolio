@@ -1,4 +1,8 @@
 <view class="brand {{size}}">
-  <image class="icon" src="/images/icon.png" mode="aspectFit" />
-  <image class="word" src="/images/wordmark.png" mode="aspectFit" />
+  <view class="icon-frame">
+    <image class="icon only-light" src="/images/icon.png" mode="aspectFit" />
+    <image class="icon only-dark" src="/images/icon-dark.png" mode="aspectFit" />
+  </view>
+  <image class="word only-light" src="/images/wordmark.png" mode="aspectFit" />
+  <image class="word only-dark" src="/images/wordmark-dark.png" mode="aspectFit" />
 </view>

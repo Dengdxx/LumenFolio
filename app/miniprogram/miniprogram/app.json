@@ -6,11 +6,11 @@
     "pages/firmware/index"
   ],
   "window": {
-    "navigationBarBackgroundColor": "#F7F6F0",
-    "navigationBarTextStyle": "black",
+    "navigationBarBackgroundColor": "@navBgColor",
+    "navigationBarTextStyle": "@navTxtStyle",
     "navigationBarTitleText": "LumenFolio",
-    "backgroundColor": "#F7F6F0",
-    "backgroundTextStyle": "dark"
+    "backgroundColor": "@bgColor",
+    "backgroundTextStyle": "@bgTxtStyle"
   },
   "darkmode": true,
   "themeLocation": "theme.json",
@@ -18,6 +18,38 @@
   "lazyCodeLoading": "requiredComponents",
   "usingComponents": {
     "brand-mark": "/components/brand/index"
+  },
+  "tabBar": {
+    "color": "@tabColor",
+    "selectedColor": "@tabSelectedColor",
+    "backgroundColor": "@tabBgColor",
+    "borderStyle": "@tabBorderStyle",
+    "list": [
+      {
+        "pagePath": "pages/connect/index",
+        "text": "连接",
+        "iconPath": "@tabIconConnect",
+        "selectedIconPath": "@tabSelectedIconConnect"
+      },
+      {
+        "pagePath": "pages/compose/index",
+        "text": "取景",
+        "iconPath": "@tabIconCompose",
+        "selectedIconPath": "@tabSelectedIconCompose"
+      },
+      {
+        "pagePath": "pages/gallery/index",
+        "text": "图库",
+        "iconPath": "@tabIconGallery",
+        "selectedIconPath": "@tabSelectedIconGallery"
+      },
+      {
+        "pagePath": "pages/firmware/index",
+        "text": "固件",
+        "iconPath": "@tabIconFirmware",
+        "selectedIconPath": "@tabSelectedIconFirmware"
+      }
+    ]
   },
   "permission": {
     "scope.bluetooth": {
