@@ -29,7 +29,7 @@
       bindtap="switchSource"
     >
       <view class="bento-top">
-        <view class="line-icon icon-flash"></view>
+        <view class="line-icon icon-sparkles"></view>
         <view class="bento-tag">{{source === 'artifacts' ? '当前' : '切换'}}</view>
       </view>
       <view class="bento-body">
@@ -47,7 +47,7 @@
       bindtap="switchSource"
     >
       <view class="bento-top">
-        <view class="line-icon icon-sd"></view>
+        <view class="line-icon icon-sparkles"></view>
         <view class="bento-tag">{{source === 'sd' ? '当前' : '切换'}}</view>
       </view>
       <view class="bento-body">
@@ -86,7 +86,7 @@
       bindtap="openPicture"
     >
       <view class="check-circle {{selected === item.id ? 'solid' : ''}}">
-        <view class="line-icon sm {{selected === item.id ? 'icon-check' : 'icon-crop'}}"></view>
+        <view class="line-icon sm {{selected === item.id ? 'icon-check' : 'icon-sparkles'}}"></view>
       </view>
       <view class="task-content">
         <view class="task-meta">{{source === 'sd' ? 'SD 根目录帧文件' : (item.id === 'boot' ? '出厂开机画面 · 受保护' : 'Flash 最近上传槽')}}</view>
@@ -97,7 +97,7 @@
   </view>
 
   <view class="panel-card empty-card" wx:if="{{!pictures.length && !busy}}">
-    <view class="line-icon icon-crop"></view>
+    <view class="line-icon icon-sparkles"></view>
     <view class="heading">这里还没有图片</view>
     <view class="muted">可前往「取景」工作台制作并上传六色画面。</view>
   </view>
