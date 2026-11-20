@@ -452,7 +452,7 @@ internal fun FrameConnectionField(
 }
 
 @Composable
-private fun FrameAddressField(address: String, onAddressChange: (String) -> Unit, enabled: Boolean) {
+internal fun FrameAddressField(address: String, onAddressChange: (String) -> Unit, enabled: Boolean) {
     val colors = MaterialTheme.colorScheme
     OutlinedTextField(
         value = address,
