@@ -1,6 +1,9 @@
 .vscode/
 .output/
 
+# 本地设计稿、实施计划和验证记录
+/context/
+
 # Generated dependencies and build caches
 node_modules/
 __pycache__/

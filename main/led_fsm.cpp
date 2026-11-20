@@ -11,7 +11,7 @@ namespace {
 
 constexpr const char *kTag = "led_fsm";
 
-// 灯效时序与亮度只改这里。docs/灯语设计.md 只给了名称，下列数值是待标定的占位。
+// 灯效时序与亮度由本模块统一控制，下列数值仍待实机标定。
 constexpr uint32_t kTickMs = 50;
 constexpr uint32_t kFastHalfMs = 150;     // 快闪：亮 150 ms，灭 150 ms
 constexpr uint32_t kSlowHalfMs = 600;     // 慢闪：亮 600 ms，灭 600 ms

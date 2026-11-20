@@ -2,7 +2,7 @@
 
 ## 设计概念
 
-- 竖置 3:4 圆角相框对应 7.09 英寸 E6 面板在竖屏使用时的 1600 × 1200（4:3）画面比例。
+- 竖置 3:4 圆角相框对应 7.09 英寸 E6 面板的 1200 × 1600 竖屏画面。
 - 右上折页把「Folio / 页册」与相框叠合；左上一个四角星表达「Lumen / 光」。
 - 图标内部只保留一条连续的六色平涂色带，去掉分散的圆角色条、重复色点和占位灰线，避免视觉杂乱。
 - 字标使用本机 `Blackadder ITC`（`ITCBLKAD.TTF`）并已转为路径，SVG 不依赖外部字体文件；大写 `L` 与 `F` 的装饰横线是该字体的字形特征。
@@ -15,7 +15,7 @@
 - `lumen-folio-icon.svg`：独立方形图标，透明背景。
 - `lumen-folio-icon.png`：512 × 512 透明背景 PNG。
 - `lumen-folio-logo-preview.svg` 从宽版绘制，叠加浅底供项目首页使用。
-- `lumen-folio-wordmark.svg` 和透明 PNG 从宽版提取完整艺术字，供 Windows 和 Android 的应用标题使用。两端按当前主题着色。
+- `lumen-folio-wordmark.svg` 和透明 PNG 从宽版提取完整字标，供 Windows 和 Android 使用；微信小程序有单独的主题资源。
 
 ## 色值
 
@@ -34,9 +34,9 @@
 
 ## 更新应用图标
 
-Windows 侧栏和 Android 顶栏使用方形图标，系统图标也从同一份方形 PNG 派生。
+Windows 和 Android 使用同一份方形图标，系统图标也从该 PNG 派生。
 
-更新 `lumen-folio-icon.png` 后，从仓库根目录运行以下命令，同步两个平台的资源。生成 Windows 资源时需安装 Pillow，并将 LLVM 的 `llvm-rc` 和 `llvm-cvtres` 加入 `PATH`。日常构建直接使用仓库中的图标资源。
+更新 `lumen-folio-icon.png` 后，从仓库根目录运行以下命令，同步 Windows 和 Android 资源。生成 Windows 资源时需安装 Pillow，并将 LLVM 的 `llvm-rc` 和 `llvm-cvtres` 加入 `PATH`。日常构建直接使用仓库中的图标资源。
 
 ```powershell
 python app/pc/branding/generate.py
@@ -45,9 +45,15 @@ Copy-Item -LiteralPath assets/branding/lumen-folio-icon.png -Destination app/and
 
 Windows 生成器也会编译 `app/pc/branding/LumenFolio.manifest`。修改清单后用同一命令重新生成 Windows 资源。
 
-更新字标时，将从宽版 SVG 提取的字标渲染为透明 PNG，再复制给两个应用。
+更新字标时，将从宽版 SVG 提取的字标渲染为透明 PNG，再复制到 Windows 和 Android。
 
 ```powershell
 Copy-Item -LiteralPath assets/branding/lumen-folio-wordmark.png -Destination app/pc/internal/desktop/lumen-folio-wordmark.png
 Copy-Item -LiteralPath assets/branding/lumen-folio-wordmark.png -Destination app/android/app/src/main/res/drawable-nodpi/lumenfolio_wordmark.png
 ```
+
+微信小程序的[品牌组件](../../app/miniprogram/miniprogram/components/brand/index.wxml)分别加载浅色的 `icon.png`、`wordmark.png` 和深色的 `icon-dark.png`、`wordmark-dark.png`。在[小程序图片目录](../../app/miniprogram/miniprogram/images)更新对应的主题素材。浅色方形图标可以用共享 PNG；字标应保留小程序的主题配色，不直接复制桌面端 PNG。
+
+## 易错点（务必遵守）
+
+- 更新素材后应用仍显示旧图标 → 各端从各自目录读取资源 → 同步对应资源。Windows 还要重新生成 `.syso` 并构建 EXE；小程序要分别检查深浅主题。

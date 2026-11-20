@@ -2,16 +2,24 @@
 
 Go 包 `lumenfolio/panel` 的 `Algorithms()` 返回界面和命令行共用的全部抖动预设。每项实现 `Ditherer`，调用 `Name()` 取得名称，再对取景采样后的 1200×1600 `*image.NRGBA` 调用 `Dither(src)`。结果是同尺寸的六色预览图，只使用面板调色板中的不透明颜色。返回顺序就是界面按钮和 `--alg` 的序号。
 
-| 算法 | 区别 |
-| --- | --- |
-| Floyd-Steinberg（蛇形） | 沿用 7:3:5:1 权重，逐行交替方向，适合和现有逐行同向版比较。 |
-| Atkinson | 把误差的 6/8 分给六个位置，保留较鲜明的局部对比，可能丢失极亮或极暗区域的细层次。 |
-| Sierra Lite | 三个扩散位置，适合优先控制计算量。 |
-| Burkes、Sierra Two-Row | 两行七个扩散位置，权重分布不同。 |
-| Sierra、Stucki、Jarvis–Judice–Ninke | 把误差分散到三行，适合与较窄的核比较大面积渐变，计算量也更大。 |
-| 蓝噪声 64×64 | 以蓝噪声阈值图代替 Bayer 网格，按像素独立取色，适合想减少规则网格纹理的画面。 |
+## 预设
 
-扩散算法沿用面板的 RGB 色差和限幅规则，偶数行从左往右，奇数行镜像扩散方向，超出画面的误差丢弃。蓝噪声与 Bayer 共用最近色和次近色的选择规则，使用固定阈值图，所以同一输入每次产生相同结果。
+顺序见 [`Algorithms()`](../app/pc/panel/dither.go)。Windows 和 Android 的六色预览按面板分辨率做抖动；微信小程序为减少等待，用较小的图做预览，上传时再按完整分辨率计算。
+
+| 序号 | 算法 | 区别 |
+| --- | --- | --- |
+| 0 | 最近色 | 每个像素取色差最小的墨水，不传播误差。 |
+| 1 | Floyd-Steinberg | 每行从左往右，按 7:3:5:1 扩散误差。 |
+| 2、3 | Bayer 4×4、Bayer 8×8 | 用规则的阈值网格决定每一像素的取色。 |
+| 4 | 随机噪声 | 用固定种子的伪随机阈值取色。 |
+| 5 | Floyd-Steinberg（蛇形） | 核权重不变，逐行反向扫描。 |
+| 6 | Atkinson | 把误差的 6/8 分给六个位置，保留局部对比，可能丢失极亮或极暗处的层次。 |
+| 7 | Sierra Lite | 三个扩散位置，计算量较小。 |
+| 8、9 | Burkes、Sierra Two-Row | 两行七个扩散位置，权重分布不同。 |
+| 10、11、12 | Sierra、Stucki、Jarvis–Judice–Ninke | 在三行内扩散，适合比较大面积渐变，计算量较大。 |
+| 13 | 蓝噪声 64×64 | 用蓝噪声阈值图代替 Bayer 网格，减少规则纹理。 |
+
+扩散算法丢弃超出画面的误差。蛇形扫描从偶数行左端、奇数行右端开始，反向时也镜像扩散核。同向扫描不镜像。蓝噪声和 Bayer 使用固定阈值图，对同一输入重复处理会得到同一结果。
 
 扩散核参考 [FFmpeg 的调色板滤镜](https://ffmpeg.org/doxygen/trunk/vf__paletteuse_8c_source.html)、[Crocker 的数字半色调资料](https://github.com/SixLabors/ImageSharp/blob/main/src/ImageSharp/Processing/Processors/Dithering/DHALF.TXT)和 [Jarvis、Judice、Ninke 的论文](https://doi.org/10.1016/S0146-664X(76)80003-2)。
 
